@@ -271,7 +271,7 @@ Contributions are welcome. A good contribution usually includes:
 
 ## License
 
-This project does not currently declare a license file. If you plan to publish or share it publicly, add an open-source license such as MIT or Apache 2.0.
+This project is licensed under the [MIT License](LICENSE) - see the file for details.
 
 ---
 
