@@ -166,7 +166,9 @@ function _renderResults(r) {
         _setText('ci-alpha', `±${(r.alpha_eff_ci95 * 100).toFixed(4)}% (95% CI)`);
     }
     if (r.epsilon_b_ci95 != null) {
-        _setText('ci-epsb',  `±${(r.epsilon_b_ci95 * 100).toFixed(4)}% (95% CI)`);
+        _setText('ci-epsb', Number(r.epsilon_b_ci95) > 0
+            ? `±${(r.epsilon_b_ci95 * 100).toFixed(4)}% (95% CI)`
+            : 'deterministic macro operator');
     }
         // ε_B < α_eff (anisotropic decoupling — the correct physics)
     if (r.epsilon_b_cavity_part != null || r.epsilon_b_flat_part != null) {

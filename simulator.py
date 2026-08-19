@@ -405,7 +405,7 @@ def run_simulation(
     # effective emissivity.  The PHYSICAL emissivity is set by Kirchhoff's law
     # below because Plate B is an isothermal, reciprocal body.
     epsilon_b_raw_cav  = mc['epsilon_b_raw']
-    epsilon_b_raw_ci95 = mc.get('epsilon_b_ci95', p_esc_ci95 * mc['cavity_enhancement'])
+    epsilon_b_raw_ci95 = mc.get('epsilon_b_ci95', 0.0)
     g_em, rim_frac, delta_avg_um = _modal_emission_gate(
         geometry, lambda_c_um, temp_b, alpha_cnt, alpha_ag, f_prop_emit_an)
 
@@ -418,8 +418,8 @@ def run_simulation(
         alpha_eff     = f * mc['alpha_eff']     + (1.0 - f) * e_f
         epsilon_b_raw = f * epsilon_b_raw_cav   + (1.0 - f) * e_f
         alpha_eff_ci95 = f * mc['alpha_eff_ci95']
-        # Area enhancement per unit cell applies only to the cavity part.
-        cavity_enhancement = f * mc['cavity_enhancement'] + (1.0 - f) * 1.0
+        # Ce is the unit-cell geometric ratio; packing affects panel emissivity.
+        cavity_enhancement = mc['cavity_enhancement']
         epsilon_b_cavity_part = f * epsilon_b_raw_cav * g_em   # LDOS-gated cavity emission
         epsilon_b_flat_part   = (1.0 - f) * e_f                # flat top (un-gated)
     else:
@@ -558,6 +558,7 @@ def run_simulation(
         'epsilon_b_raw':          epsilon_b_raw,
         'epsilon_b_ci95':         epsilon_b_ci95,
         'cavity_enhancement':     cavity_enhancement,
+        'macro_cavity_emissivity': float(epsilon_b_raw_cav),
         'kirchhoff_error':        kirchhoff_error,
         # Bug #13 wave-optics diagnostics
         'cutoff_wavelength_um':   lambda_c_um,

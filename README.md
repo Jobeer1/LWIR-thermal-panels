@@ -160,7 +160,7 @@ Then open:
 http://127.0.0.1:5000/
 ```
 
-The browser page lets you select the geometry mode, enter temperatures and dimensions, and run the Monte Carlo simulation.
+The browser page lets you select the geometry mode, enter temperatures and dimensions, and run the Monte Carlo simulation. Its visual theme uses a calm, high-contrast palette based on the South African flag: green, gold, red, blue, and black accents.
 
 ---
 
@@ -178,7 +178,7 @@ Example request body:
 {
   "geometry_mode": "honeycomb",
   "height": 450,
-  "cavity_diameter": 20,
+  "cavity_diameter": 0.5,
   "wall_thickness": 1.0,
   "temp_a": 600,
   "temp_b": 300,
@@ -190,6 +190,8 @@ Example request body:
   "full_gap_mc": false
 }
 ```
+
+For honeycomb geometry, `cavity_diameter` is specified in micrometres and accepts values from `0.001` um (1 nm) upward, including sub-micrometre PAA cavities. `wall_thickness` must be greater than zero. The UI uses `0.001` um increments; direct API clients receive a validation error for invalid values.
 
 The server responds with JSON containing a `results` object, including values such as:
 
@@ -207,7 +209,7 @@ The server responds with JSON containing a `results` object, including values su
 ## Notes on usage
 
 - The app defaults to a honeycomb-type geometry if no mode is specified.
-- The browser UI accepts a limited set of typical engineering inputs.
+- The browser UI accepts a limited set of typical engineering inputs, including sub-micrometre PAA honeycomb cavity diameters.
 - High photon counts increase run time but reduce Monte Carlo noise.
 - Very small gap distances can trigger a near-field warning because the model is primarily a far-field radiative approximation.
 
@@ -217,10 +219,8 @@ The server responds with JSON containing a `results` object, including values su
 
 If you want to leave feedback, report a bug, or suggest an improvement, please open an issue in the project repository.
 
-> Replace the URL below with your actual GitHub repository before publishing this project.
-
 ```text
-https://github.com/<your-username>/<your-repo>/issues
+https://github.com/Jobeer1/LWIR-thermal-panels/issues
 ```
 
 A good issue report should include:

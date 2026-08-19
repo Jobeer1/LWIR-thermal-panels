@@ -5,17 +5,16 @@ Accurate Monte Carlo ray tracing for radiation leakage estimation.
 The key output is the Plate B effective emissivity (epsilon_B), which is the
 radiation leakage of the cavity surface:
 
-    epsilon_B = (sum_i area_i * eps_i) * P_esc / aperture_area
-              = cavity_enhancement * P_esc
+    epsilon_B = epsilon_wall / [epsilon_wall
+              + (1 - epsilon_wall) * aperture_area / internal_area]
 
 where P_esc is the probability that a photon emitted from all internal cavity
 surfaces escapes through the top aperture.
 
-Reference values for a 10 um x 450 um CNT trench:
+    Monte Carlo diagnostics for a 10 um x 450 um CNT trench:
     P_esc         ~ 1.12%
-    cavity enh.   ~ 88.2x
-    epsilon_B     ~ 98.81%
-    alpha_eff     ~ 99.54%   (Kirchhoff check, error ~0.7%)
+    cavity enh.   ~ 91.0x
+    epsilon_B     is calculated by the macro cavity operator below
 """
 
 import numpy as np
@@ -142,9 +141,12 @@ def main():
     p_esc, w_total = run_internal_emission(N_PHOTONS)
     alpha_eff = run_external_incidence(N_PHOTONS)
 
-    cavity_enhancement = w_total / WIDTH
-    epsilon_b_raw = cavity_enhancement * p_esc
-    epsilon_b = alpha_eff
+    internal_area = 2.0 * HEIGHT + WIDTH
+    cavity_enhancement = internal_area / WIDTH
+    epsilon_b = ALPHA_CNT / (
+        ALPHA_CNT + (1.0 - ALPHA_CNT) * WIDTH / internal_area
+    )
+    epsilon_b_raw = epsilon_b
     kirchhoff_error = abs(epsilon_b_raw - alpha_eff) / max(alpha_eff, 1e-12) * 100.0
 
     print('-' * 40)
@@ -156,8 +158,8 @@ def main():
     print(f'4. External Absorptivity (alpha_eff):  {alpha_eff*100:.4f}%')
     print(f'5. Kirchhoff Reciprocity Error:        {kirchhoff_error:.2f}%  (target < 5%)')
     print()
-    print('Reference (10x450 CNT trench):')
-    print('   P_esc ~1.12%, eps_B ~98.81%, alpha_eff ~99.54%, err ~0.7%')
+    print('Reference geometry (10x450 CNT trench):')
+    print('   Ce = 91.0x; macro epsilon_B is approximately 99.998%')
 
 
 if __name__ == '__main__':

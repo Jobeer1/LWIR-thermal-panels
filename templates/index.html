@@ -5,16 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monte Carlo Radiative Exchange — CNT Forest Simulator</title>
     <meta name="description" content="Physically accurate Monte Carlo ray-tracing simulation of radiative heat exchange between a flat plate and a CNT-forest or cavity plate in vacuum.">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="background-orbs">
-        <div class="orb orb-1"></div>
-        <div class="orb orb-2"></div>
-        <div class="orb orb-3"></div>
-    </div>
-
     <main class="container">
         <header>
             <div class="header-badge">Monte Carlo Ray Tracing</div>
@@ -117,15 +111,17 @@
                     <!-- Honeycomb Cavity fields -->
                     <div id="fields-honeycomb">
                         <div class="mode-info-box">
-                                <strong>Honeycomb Cavity Panel:</strong> cylindrical cavities bored into the substrate,
+                                <strong>PAA Honeycomb Cavity Panel:</strong> cylindrical alumina cavities bored into the substrate,
                             arranged in a hexagonal close-packed array. Center-to-center pitch
                             P = Hole Diameter + Wall Thickness. Packing fraction f = π/(2√3)·(D/(D+w))².
                             The panel effective emissivity = f × ε<sub>B,cavity</sub> + (1−f) × ε<sub>flat</sub>.
                         </div>
                         <div class="input-row">
                             <div class="input-group">
-                                <label for="cavity_diameter">Hole Diameter (µm)</label>
-                                <input type="number" id="cavity_diameter" name="cavity_diameter" value="20" step="1" min="1">
+                                <label for="cavity_diameter">PAA Cavity Diameter (µm)
+                                    <span class="label-note">1 nm minimum</span>
+                                </label>
+                                <input type="number" id="cavity_diameter" name="cavity_diameter" value="20" step="0.001" min="0.001" inputmode="decimal" required>
                             </div>
                             <div class="input-group">
                                 <label for="wall_thickness">Wall Thickness (µm)</label>
@@ -371,13 +367,12 @@
                                                 <p><strong>Wave optics &amp; directional asymmetry:</strong> each Monte-Carlo
                         photon is wavelength-sampled from the Planck distribution at T<sub>B</sub> /
                         T<sub>A</sub> and tested against the channel's modal cutoff λ<sub>c</sub>
-                        (TE11/TE10). Sub-wavelength pores (5 µm < λ<sub>c</sub> = 8.53 µm at 300 K)
-                        make deep thermal modes evanescent: internally-emitted photons below
+                        (TE11/TE10). When a pore's thermal wavelengths exceed its cutoff,
+                        deep thermal modes become evanescent: internally-emitted photons above
                         λ<sub>c</sub> become evanescent waves that decay as exp(−L/δ<sub>ev</sub>)
                         and fail to reach the aperture (LDOS suppression — Lin PRB 2000;
-                        Narayanaswamy &amp; Chen PRB 2004). Only the shallow rim strip (within one
-                        δ<sub>ev</sub>) and the 17.4% propagating spectral fraction escape, driving
-                        ε<sub>B</sub> → 0.</p>
+                        Narayanaswamy &amp; Chen PRB 2004). The reported propagating fraction and
+                        rim contribution are calculated for the selected geometry.</p>
                                                 <p>Incident light, by contrast, diffracts around the thin <span id="wall-thickness-val">—</span> µm wall rims
                         and is trapped by the graded-index surface (α<sub>eff</sub> → 1). This
                         creates the operational decoupling: <strong>α<sub>eff</sub> ≫

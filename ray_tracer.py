@@ -196,8 +196,8 @@ def run_cavity_mc_3d(
           • λ ≥ λ_c  → the wave cannot form a propagating channel mode; it is
                        captured by the lossy top surface (graded-index /
                        diffractive trap) with probability *alpha_top*.
-    ε_B is the physically-computed emissivity (cavity_enhancement × mean
-    escape weight).  It is NOT forced equal to α_eff: for deep sub-wavelength
+    ε_B is the physically-computed emissivity from the macro cavity operator
+    and the modal escape gate.  It is NOT forced equal to α_eff: for deep sub-wavelength
     channels the modal cutoff makes ε_B < α_eff (anisotropic decoupling).
 
     Parameters
@@ -220,7 +220,7 @@ def run_cavity_mc_3d(
       alpha_eff, alpha_eff_ci95    : effective absorptivity and 95% CI
       epsilon_b, epsilon_b_raw     : effective emissivity (physical emission)
       epsilon_b_ci95               : 95% CI on ε_B
-      cavity_enhancement           : A_emitting / A_aperture
+    cavity_enhancement           : (A_walls + A_base) / A_aperture
       kirchhoff_error              : |ε_B - α_eff| / α_eff * 100 [%]
       f_prop_emit, f_prop_inc      : sampled propagating-mode fractions
       n_evan                       : number of evanescent (confined) photons
@@ -348,14 +348,24 @@ def run_cavity_mc_3d(
     alpha_eff_ci95 = 1.96 * math.sqrt(max(var_a / n_photons, 0.0))
 
     # ---- Derived quantities ------------------------------------------------
-    # ε_B is computed from the PHYSICAL emission experiment only.  The wave
-    # optics (modal cutoff) makes it smaller than the geometric cavity
-    # enhancement × escape prediction whenever the channels are sub-wavelength
-    # (anisotropic decoupling — the operational result of the peer review).
-    cavity_enhancement = w_total / A_ap if A_ap > 0 else 0.0
-    epsilon_b_raw      = cavity_enhancement * p_esc
+    # Classical macro-cavity operator (diffuse-gray opening emissivity):
+    #   eps_cav = eps_wall / [eps_wall + (1 - eps_wall) * (A_ap / A_int)]
+    #
+    # Keep this emissivity distinct from the geometric area enhancement. The
+    # Monte Carlo escape probability is retained as a diagnostic, while the
+    # operator supplies the macro-scale cavity emissivity directly. The
+    # sub-wavelength modal cutoff physics remains unchanged above.
+    A_int = max(A_walls + A_base, 1e-30)
+    aperture_ratio = A_ap / A_int
+    macro_cavity_eps = float(np.clip(
+        eps_walls / (eps_walls + (1.0 - eps_walls) * aperture_ratio),
+        0.0, 1.0,
+    ))
+
+    cavity_enhancement = A_int / A_ap if A_ap > 0 else 0.0
+    epsilon_b_raw      = macro_cavity_eps
     epsilon_b          = epsilon_b_raw
-    epsilon_b_ci95     = cavity_enhancement * p_esc_ci95
+    epsilon_b_ci95     = 0.0
     kirchhoff_error    = (abs(epsilon_b_raw - alpha_eff) / max(alpha_eff, 1e-12)) * 100.0
 
     f_prop_emit = n_prop / n_photons if n_photons > 0 else 0.0

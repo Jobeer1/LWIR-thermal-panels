@@ -1,3 +1,5 @@
+import math
+
 from flask import Flask, render_template, request, jsonify
 from simulator import run_simulation
 
@@ -30,9 +32,12 @@ def simulate():
         # ---- Honeycomb-specific ------------------------------------------
         cavity_diameter = float(data.get('cavity_diameter', 20.0))  # µm
         wall_thickness  = float(data.get('wall_thickness', 1.0))    # µm
-        
+        if not math.isfinite(cavity_diameter) or cavity_diameter < 0.001:
+            raise ValueError('Honeycomb cavity diameter must be at least 0.001 µm (1 nm).')
+        if not math.isfinite(wall_thickness) or wall_thickness <= 0:
+            raise ValueError('Honeycomb wall thickness must be greater than 0 µm.')
+
         # Calculate packing fraction for a hexagonal close-packed array of holes
-        import math
         pitch_hc = cavity_diameter + wall_thickness
         if pitch_hc > 0:
             packing_fraction = (math.pi / (2 * math.sqrt(3))) * (cavity_diameter / pitch_hc)**2
