@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monte Carlo Radiative Exchange — CNT Forest Simulator</title>
+    <meta name="description" content="Physically accurate Monte Carlo ray-tracing simulation of radiative heat exchange between a flat plate and a CNT-forest or cavity plate in vacuum.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="background-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <main class="container">
+        <header>
+            <div class="header-badge">Monte Carlo Ray Tracing</div>
+            <h1>Two-Plate <span>Radiative Exchange</span></h1>
+            <p>3-D cavity geometry · Spectral emissivity · Near-field warnings · 95% confidence intervals</p>
+        </header>
+
+        <div class="dashboard">
+            <!-- ===================== LEFT: CONFIG PANEL ==================== -->
+            <section class="glass-panel config-panel">
+                <h2>⚙ Simulation Parameters</h2>
+                <form id="sim-form">
+
+                    <!-- GEOMETRY MODE TOGGLE -->
+                    <div class="section-label">Plate B Geometry Mode</div>
+                    <div class="mode-selector" id="mode-selector">
+                        <button type="button" class="mode-btn active" data-mode="honeycomb" id="mode-honeycomb">
+                            🔷 Honeycomb Cavity Panel
+                        </button>
+                        <button type="button" class="mode-btn" data-mode="cnt_forest" id="mode-forest">
+                            🌲 CNT Forest Panel
+                        </button>
+                    </div>
+                    <input type="hidden" id="geometry_mode" name="geometry_mode" value="honeycomb">
+
+                    <!-- ========== PLATE A ========== -->
+                    <div class="section-label">Plate A — Flat Source</div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="temp_a">Temperature (K)</label>
+                            <input type="number" id="temp_a" name="temp_a" value="600" step="1" min="1" required>
+                        </div>
+                        <div class="input-group">
+                            <label for="emissivity_a">Emissivity (ε<sub>A</sub>)</label>
+                            <input type="number" id="emissivity_a" name="emissivity_a" value="1.0" step="0.01" max="1" min="0.001" required>
+                        </div>
+                    </div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="width_a">Width (µm)</label>
+                            <input type="number" id="width_a" name="width_a" value="1000" step="1" min="1" required>
+                        </div>
+                        <div class="input-group">
+                            <label for="depth_a">Depth (µm)</label>
+                            <input type="number" id="depth_a" name="depth_a" value="1000" step="1" min="1" required>
+                        </div>
+                    </div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="emissivity_a_back">Back Emissivity (ε<sub>back</sub>)</label>
+                            <input type="number" id="emissivity_a_back" name="emissivity_a_back" value="0.1" step="0.01" max="1" min="0.001">
+                        </div>
+                        <div class="input-group">
+                            <label for="material_a">Material (spectral)
+                                <span class="label-note">optional</span>
+                            </label>
+                            <select id="material_a" name="material_a" class="select-input">
+                                <option value="">Gray body (scalar ε)</option>
+                                <option value="silver">Silver (Ag)</option>
+                                <option value="silver_oxidised">Oxidised Silver</option>
+                                <option value="gold">Gold (Au)</option>
+                                <option value="metal_generic">Generic Metal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- ========== GAP ========== -->
+                    <div class="section-label">Gap &amp; Environment</div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="gap">Gap Distance (µm)
+                                <span class="label-note" id="nf-label-hint"></span>
+                            </label>
+                            <input type="number" id="gap" name="gap" value="100" step="1" min="0.001" required>
+                        </div>
+                        <div class="input-group">
+                            <label for="temp_surr">Surroundings Temp (K)</label>
+                            <input type="number" id="temp_surr" name="temp_surr" value="300" step="1" min="0" required>
+                        </div>
+                    </div>
+
+                    <!-- ========== PLATE B — shared ========== -->
+                    <div class="section-label">Plate B — Cavity / CNT Panel</div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="temp_b">Temperature (K)</label>
+                            <input type="number" id="temp_b" name="temp_b" value="300" step="1" min="1" required>
+                        </div>
+                        <div class="input-group">
+                            <label for="height">Cavity Height (µm)</label>
+                            <input type="number" id="height" name="height" value="450" step="1" min="0.001" required>
+                        </div>
+                    </div>
+
+                    <!-- Honeycomb Cavity fields -->
+                    <div id="fields-honeycomb">
+                        <div class="mode-info-box">
+                                <strong>Honeycomb Cavity Panel:</strong> cylindrical cavities bored into the substrate,
+                            arranged in a hexagonal close-packed array. Center-to-center pitch
+                            P = Hole Diameter + Wall Thickness. Packing fraction f = π/(2√3)·(D/(D+w))².
+                            The panel effective emissivity = f × ε<sub>B,cavity</sub> + (1−f) × ε<sub>flat</sub>.
+                        </div>
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label for="cavity_diameter">Hole Diameter (µm)</label>
+                                <input type="number" id="cavity_diameter" name="cavity_diameter" value="20" step="1" min="1">
+                            </div>
+                            <div class="input-group">
+                                <label for="wall_thickness">Wall Thickness (µm)</label>
+                                <input type="number" id="wall_thickness" name="wall_thickness" value="1" step="0.1" min="0.001">
+                            </div>
+                        </div>
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label for="emissivity_cnt_hc">Wall Emissivity (ε<sub>wall</sub>)</label>
+                                <input type="number" id="emissivity_cnt_hc" name="emissivity_cnt_hc" value="0.8" step="0.01" max="1" min="0">
+                            </div>
+                            <div class="input-group">
+                                <label for="emissivity_base_hc">Base Emissivity (ε<sub>base</sub>)</label>
+                                <input type="number" id="emissivity_base_hc" name="emissivity_base_hc" value="0.1" step="0.01" max="1" min="0">
+                            </div>
+                        </div>
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label for="eps_flat_wall">Inter-cavity Emissivity (ε<sub>flat</sub>)</label>
+                                <input type="number" id="eps_flat_wall" name="eps_flat_wall" value="0.8" step="0.01" max="1" min="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CNT Forest fields -->
+                    <div id="fields-forest" style="display:none;">
+                        <div class="mode-info-box">
+                            <strong>CNT Forest Panel:</strong> vertically-aligned solid carbon nanotube pillars
+                            in a square periodic array. Radiation travels in the <em>interstitial space between
+                            the pillars</em> — not inside the tubes. Periodic boundary conditions apply.
+                        </div>
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label for="cnt_pitch">CNT Pitch (µm)</label>
+                                <input type="number" id="cnt_pitch" name="cnt_pitch" value="0.05" step="0.001" min="0.001">
+                            </div>
+                            <div class="input-group">
+                                <label for="cnt_diameter_base">CNT Diam. Base (nm)</label>
+                                <input type="number" id="cnt_diameter_base" name="cnt_diameter_base" value="10" step="0.1" min="0.1">
+                            </div>
+                        </div>
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label for="cnt_diameter_top">CNT Diam. Tip (nm)</label>
+                                <input type="number" id="cnt_diameter_top" name="cnt_diameter_top" value="5" step="0.1" min="0.1">
+                            </div>
+                            <div class="input-group">
+                                <label for="material_b">CNT Material (spectral)</label>
+                                <select id="material_b" name="material_b" class="select-input">
+                                    <option value="cnt_forest">VACNT Forest (literature)</option>
+                                    <option value="">Gray body (scalar ε)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label for="emissivity_cnt_forest">CNT Wall Emissivity (ε<sub>cnt</sub>)</label>
+                                <input type="number" id="emissivity_cnt_forest" name="emissivity_cnt_forest" value="0.98" step="0.01" max="1" min="0" required>
+                            </div>
+                            <div class="input-group">
+                                <label for="emissivity_base_forest">Substrate Emissivity (ε<sub>sub</sub>)</label>
+                                <input type="number" id="emissivity_base_forest" name="emissivity_base_forest" value="0.4" step="0.01" max="1" min="0" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ========== MC SETTINGS ========== -->
+                    <div class="section-label">Monte Carlo Settings</div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="n_photons">Photons / experiment <span class="label-note">(max 200k)</span></label>
+                            <input type="number" id="n_photons" name="n_photons" value="20000" step="1000" max="200000" min="1000" required>
+                        </div>
+                    </div>
+
+                    <div class="input-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="full_gap_mc" name="full_gap_mc" value="true">
+                            Enable full-gap MC view factor (independent check)
+                        </label>
+                    </div>
+
+                    <div class="input-row" id="gap-mc-row" style="display:none;">
+                        <div class="input-group">
+                            <label for="n_gap_photons">Gap MC Photons</label>
+                            <input type="number" id="n_gap_photons" name="n_gap_photons" value="20000" step="1000" max="100000" min="1000">
+                        </div>
+                    </div>
+
+                    <button type="submit" id="run-btn">
+                        <span class="btn-text">▶ Run Simulation</span>
+                        <div class="loader hidden"></div>
+                    </button>
+                </form>
+            </section>
+
+
+            <!-- ===================== RIGHT: RESULTS PANEL ================== -->
+            <section class="glass-panel results-panel">
+                <h2>📊 Results</h2>
+
+                <!-- Warning banners -->
+                <div id="near-field-banner" class="warning-banner hidden"></div>
+
+                <div class="results-container">
+
+                    <!-- Net flux — hero card -->
+                    <div class="result-card accent-card hero-card">
+                        <h3>Net Radiative Flux q″ (A→B)</h3>
+                        <div class="value" id="res-leak">--</div>
+                        <p class="unit">W/m² (net, A front face)</p>
+                    </div>
+
+                    <!-- 2-column grid -->
+                    <div class="results-grid">
+
+                                                <div class="result-card">
+                            <h3>Plate B Eff. Emissivity (ε<sub>B</sub>)</h3>
+                            <div class="value" id="res-epsilon-b">--%</div>
+                            <div class="ci-label" id="ci-epsb"></div>
+                            <p class="unit" id="res-epsb-breakdown">physical emission (modal-cutoff corrected)</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Emitted Flux (Plate B)</h3>
+                            <div class="value" id="res-emitted-flux" style="font-size:1.8rem;">--</div>
+                            <p class="unit">W/m² (total radiant exitance)</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Cavity Enhancement C<sub>e</sub></h3>
+                            <div class="value" id="res-enhancement">--×</div>
+                            <p class="unit">A<sub>walls</sub> / A<sub>aperture</sub> (3-D areas)</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Escape Probability P<sub>esc</sub></h3>
+                            <div class="value" id="res-esc">--%</div>
+                            <div class="ci-label" id="ci-pesc"></div>
+                            <p class="unit">photons emitted from all surfaces</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Absorptivity α<sub>eff</sub></h3>
+                            <div class="value" id="res-abs">--%</div>
+                            <div class="ci-label" id="ci-alpha"></div>
+                            <p class="unit">Kirchhoff check (ext. illumination)</p>
+                        </div>
+
+                        <div class="result-card kirchhoff-card" id="kirchhoff-card">
+                                                        <h3>Kirchhoff Consistency |ε<sub>B</sub> − α<sub>eff</sub>|/α<sub>eff</sub></h3>
+                            <div class="value" id="res-kirchhoff">--%</div>
+                            <p class="unit">0% = ε_B = α_eff (reciprocity) · ↑ = decoupling (ε_B ≪ α_eff)</p>
+                        </div>
+
+                                                <div class="result-card">
+                            <h3>View Factor F<sub>A→B</sub></h3>
+                            <div class="value" id="res-view-factor" style="font-size:1.6rem;">--</div>
+                            <p class="unit">3-D finite-rectangle (Howell C-11)</p>
+                        </div>
+
+                        <!-- Wave-optics spectral diagnostics -->
+                        <div class="result-card wave-card">
+                            <h3>Modal Cutoff λ<sub>c</sub></h3>
+                            <div class="value mono" id="res-cutoff" style="font-size:1.6rem;">--</div>
+                            <p class="unit">TE10/TE11 channel cutoff (µm)</p>
+                        </div>
+
+                        <div class="result-card wave-card">
+                            <h3>Propagating Modes</h3>
+                            <div class="value mono" id="res-fprop">--%</div>
+                            <p class="unit">Planck power below λ<sub>c</sub></p>
+                        </div>
+
+                        <div class="result-card wave-card">
+                            <h3>Emission Confinement</h3>
+                            <div class="value mono" id="res-confine">--%</div>
+                            <p class="unit">spectral fraction above λ<sub>c</sub></p>
+                        </div>
+
+                        <div class="result-card wave-card">
+                            <h3>ε<sub>B</sub>/α<sub>eff</sub></h3>
+                            <div class="value mono" id="res-decoup">--×</div>
+                            <p class="unit">α_eff ≫ ε_B (sub-wavelength decoupling)</p>
+                        </div>
+
+                        <div class="result-card">
+                            <h3>Escape Solid Angle Ω<sub>esc</sub></h3>
+                            <div class="value mono" id="res-omega">--</div>
+                            <p class="unit">sr  [≈ π(R/H)²]</p>
+                        </div>
+
+                    </div>
+
+                    <!-- Spectral row -->
+                    <div class="spectral-row" id="spectral-row">
+                        <div class="result-card spectral-card">
+                            <h3>ε<sub>A</sub> Planck-weighted</h3>
+                            <div class="value mono" id="res-eps-a-spec" style="font-size:1.5rem;">--</div>
+                            <p class="unit">vs. gray-body input</p>
+                        </div>
+                        <div class="result-card spectral-card">
+                            <h3>Spectral Correction</h3>
+                            <div class="value mono" id="res-spec-corr" style="font-size:1.5rem;">--%</div>
+                            <p class="unit">deviation from gray-body ε<sub>A</sub></p>
+                        </div>
+                    </div>
+
+                    <!-- Heat flow breakdown -->
+                    <div class="section-label">Heat Flow Breakdown</div>
+                    <div class="results-grid">
+                        <div class="result-card accent-card">
+                            <h3>Total Net Q<sub>net</sub></h3>
+                            <div class="value mono" id="res-total-heat" style="font-size:1.5rem;">--</div>
+                            <p class="unit">W (A-front + A-back combined)</p>
+                        </div>
+                        <div class="result-card">
+                            <h3>A-front → B coupling</h3>
+                            <div class="value mono" id="res-coupling" style="font-size:1.5rem;">--</div>
+                            <p class="unit">W (absorbed by B)</p>
+                        </div>
+                        <div class="result-card">
+                            <h3>A-back → Surroundings</h3>
+                            <div class="value mono" id="res-aback" style="font-size:1.5rem;">--</div>
+                            <p class="unit">W (back-face loss)</p>
+                        </div>
+                        <div class="result-card">
+                            <h3>Net flux on A-front</h3>
+                            <div class="value mono" id="res-flux-afront" style="font-size:1.5rem;">--</div>
+                            <p class="unit">W/m² (physical: ε_A≠ε_B mismatch)</p>
+                        </div>
+                        <div class="result-card wave-card">
+                            <h3>Plate B Stagnation Temperature</h3>
+                            <div class="value mono" id="res-t-stag" style="font-size:1.5rem;">--</div>
+                            <p class="unit">°C / K (adiabatic wall: absorbed = emitted)</p>
+                        </div>
+                    </div>
+
+                                        <!-- Geometry info -->
+                    <div class="info-box" id="geometry-info-box">
+                        <p><strong>Geometry:</strong> <span id="geometry-label">—</span></p>
+                                                <p><strong>Wave optics &amp; directional asymmetry:</strong> each Monte-Carlo
+                        photon is wavelength-sampled from the Planck distribution at T<sub>B</sub> /
+                        T<sub>A</sub> and tested against the channel's modal cutoff λ<sub>c</sub>
+                        (TE11/TE10). Sub-wavelength pores (5 µm < λ<sub>c</sub> = 8.53 µm at 300 K)
+                        make deep thermal modes evanescent: internally-emitted photons below
+                        λ<sub>c</sub> become evanescent waves that decay as exp(−L/δ<sub>ev</sub>)
+                        and fail to reach the aperture (LDOS suppression — Lin PRB 2000;
+                        Narayanaswamy &amp; Chen PRB 2004). Only the shallow rim strip (within one
+                        δ<sub>ev</sub>) and the 17.4% propagating spectral fraction escape, driving
+                        ε<sub>B</sub> → 0.</p>
+                                                <p>Incident light, by contrast, diffracts around the thin <span id="wall-thickness-val">—</span> µm wall rims
+                        and is trapped by the graded-index surface (α<sub>eff</sub> → 1). This
+                        creates the operational decoupling: <strong>α<sub>eff</sub> ≫
+                        ε<sub>B</sub></strong> — the hallmark of sub-wavelength structured
+                        emitters. Even at T_A = T_B, the emissivity mismatch (ε_A ≠ ε_B) means
+                        one-way radiation flows both ways (A→B: ~ε_A·F·α_eff·σT⁴,
+                        B→A: ~ε_B·F·σT⁴); the physical net A→B flux balances
+                        against the surroundings.</p>
+                    </div>
+
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
