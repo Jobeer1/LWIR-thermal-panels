@@ -141,6 +141,11 @@ document.getElementById('sim-form').addEventListener('submit', async (e) => {
 function _renderResults(r) {
     // Solver-mode badge (Phase 6): ray fallback vs cached full-wave
     _updateSolverBadge(r.solver_mode, r.wave_model, r.wave_response_info);
+    
+    // Physics regime badge (Phase 3): near-field vs far-field
+    if (r.physics_regime !== undefined && r.gap_ratio !== undefined) {
+        _updatePhysicsRegimeBadge(r.physics_regime, r.gap_ratio);
+    }
 
     // MC results
     const pEsc     = (r.p_esc != null) ? (r.p_esc     * 100).toFixed(3) : '—';
@@ -194,6 +199,18 @@ function _renderResults(r) {
         _setText('res-decoup', Number(r.decoupling_ratio).toFixed(3) + '×');
     if (r.escape_solid_angle_sr != null)
         _setText('res-omega', Number(r.escape_solid_angle_sr).toExponential(2) + ' sr');
+
+    // Phase 3 near-field diagnostics
+    if (r.physics_regime === 'near-field') {
+        if (r.evanescent_fraction !== undefined && r.evanescent_fraction > 0) {
+            const evan_pct = (100 * Number(r.evanescent_fraction)).toFixed(1);
+            const evan_flux = _fmtW(r.evanescent_flux_W_m2, 2);
+            const prop_flux = _fmtW(r.propagating_flux_W_m2, 2);
+            _setText('near-field-info',
+                `<strong>Evanescent waves:</strong> ${evan_pct}% of total flux (${evan_flux} W/m²)<br/>` +
+                `<strong>Propagating:</strong> ${prop_flux} W/m²`);
+        }
+    }
 
     // 95% Confidence intervals
     const isCached = r.solver_mode === 'cached';
@@ -281,6 +298,27 @@ function _updateSolverBadge(solverMode, waveModel, waveInfo) {
         badge.className = 'solver-badge solver-ray';
         badge.textContent = 'Solver Mode: Ray Tracing (Fallback)';
         badge.title = 'Monte Carlo 3-D ray tracer';
+    }
+}
+
+// ---- Physics regime badge (Phase 3 near-field indicator) --------------------
+
+function _updatePhysicsRegimeBadge(physicsRegime, gapRatio) {
+    const badge = document.getElementById('physics-regime-badge');
+    if (!badge) return;
+    
+    if (physicsRegime === 'near-field') {
+        badge.className = 'physics-regime-badge physics-regime-near-field';
+        badge.innerHTML = `⚡ NEAR-FIELD MODE (Gap Ratio: ${Number(gapRatio).toFixed(2)})`;
+        badge.title = 'Polder-Van Hove near-field radiative transfer active (Phase 3)';
+    } else if (physicsRegime && physicsRegime.includes('far-field')) {
+        badge.className = 'physics-regime-badge physics-regime-far-field';
+        badge.innerHTML = `📡 FAR-FIELD MODE (Gap Ratio: ${Number(gapRatio).toFixed(2)})`;
+        badge.title = 'Classical far-field radiosity calculation (Phase 0/6)';
+    } else {
+        badge.className = 'physics-regime-badge physics-regime-unknown';
+        badge.innerHTML = '? Unknown Regime';
+        badge.title = 'Physics regime not determined';
     }
 }
 

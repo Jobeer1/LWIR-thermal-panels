@@ -48,7 +48,12 @@ from typing import Union
 
 from geometry import RectPit3D, FrustumCavity3D, CNTForestCell
 from sampling  import sample_hemisphere_3d, sample_planck_wavelength
-from material_optics import effective_emissivity_thin_film
+from material_optics import (
+    effective_emissivity_thin_film,
+    get_complex_refractive_index,
+    tmm_reflectance_single_layer
+)
+from waveguide_modes import solve_te11_mode_complex, attenuation_factor_lossy_waveguide
 
 AnyGeometry = Union[RectPit3D, FrustumCavity3D, CNTForestCell]
 
@@ -71,7 +76,12 @@ def _trace_photon(pos: np.ndarray,
                   geometry: AnyGeometry,
                   eps_walls: float,
                   eps_base:  float,
-                  re_entry_prob: float = 0.0) -> float:
+                  re_entry_prob: float = 0.0,
+                  use_complex_fresnel: bool = False,
+                  wall_thickness_um: float = None,
+                  wall_material: str = 'alumina',
+                  base_material: str = 'silver',
+                  photon_wavelength_um: float = None) -> float:
     """Trace one photon from *pos* in *direction* inside *geometry*.
 
     Returns the photon's surviving energy weight at escape (> 0 means it
@@ -81,26 +91,16 @@ def _trace_photon(pos: np.ndarray,
     ----------
     pos, direction    : initial position (m) and unit direction vector.
     geometry          : cavity geometry object.
-    eps_walls         : wall emissivity / absorptivity.
-    eps_base          : base emissivity / absorptivity.
+    eps_walls         : wall emissivity / absorptivity (bulk or fallback).
+    eps_base          : base emissivity / absorptivity (bulk or fallback).
     re_entry_prob     : probability that a photon escaping the aperture is
                         immediately re-injected downward (models plate A
                         reflection — Bug #9 fix).  Typically (1-ε_A)·F_AB.
-    """
-    """Trace one photon from *pos* in *direction* inside *geometry*.
-
-    Returns the photon's surviving energy weight at escape (> 0 means it
-    left through the aperture), or 0 if absorbed.
-
-    Parameters
-    ----------
-    pos, direction    : initial position (m) and unit direction vector.
-    geometry          : cavity geometry object.
-    eps_walls         : wall emissivity / absorptivity.
-    eps_base          : base emissivity / absorptivity.
-    re_entry_prob     : probability that a photon escaping the aperture is
-                        immediately re-injected downward (models plate A
-                        reflection — Bug #9 fix).  Typically (1-ε_A)·F_AB.
+    use_complex_fresnel : if True, use complex Fresnel reflectance via TMM.
+    wall_thickness_um : wall thickness for TMM calculation (µm).
+    wall_material     : wall material for complex refractive index lookup.
+    base_material     : base material for complex refractive index lookup.
+    photon_wavelength_um : photon wavelength (µm) for Fresnel/TMM calculation.
     """
     weight = 1.0
 
@@ -133,9 +133,44 @@ def _trace_photon(pos: np.ndarray,
         bounces += 1
 
         if surface == 'wall' or surface == 'top_cap':
-            eps = eps_walls
+            # Phase 1 Integration: Use complex Fresnel reflectance if enabled
+            if use_complex_fresnel and photon_wavelength_um is not None and wall_thickness_um is not None:
+                try:
+                    n_real, k_imag = get_complex_refractive_index(wall_material, photon_wavelength_um)
+                    n_complex = n_real + 1.0j * k_imag
+                    R = tmm_reflectance_single_layer(
+                        n_0=1.0 + 0.0j,  # vacuum/air
+                        n_1=n_complex,   # wall material
+                        n_2=n_complex,   # backing (wall)
+                        thickness_um=wall_thickness_um,
+                        wavelength_um=photon_wavelength_um
+                    )
+                    eps = float(np.clip(R, 0.0, 1.0))
+                except Exception:
+                    # Fallback to bulk emissivity on error
+                    eps = eps_walls
+            else:
+                eps = eps_walls
         elif surface == 'base':
-            eps = eps_base
+            # Phase 1 Integration: Use complex Fresnel for base if parameters provided
+            if use_complex_fresnel and photon_wavelength_um is not None:
+                try:
+                    n_real, k_imag = get_complex_refractive_index(base_material, photon_wavelength_um)
+                    n_complex = n_real + 1.0j * k_imag
+                    # Assume base is thick (100 µm)
+                    base_thickness_um = 100.0
+                    R = tmm_reflectance_single_layer(
+                        n_0=1.0 + 0.0j,
+                        n_1=n_complex,
+                        n_2=n_complex,
+                        thickness_um=base_thickness_um,
+                        wavelength_um=photon_wavelength_um
+                    )
+                    eps = float(np.clip(R, 0.0, 1.0))
+                except Exception:
+                    eps = eps_base
+            else:
+                eps = eps_base
         else:
             return 0.0
 
@@ -165,11 +200,15 @@ def _trace_photon_thin_film(pos: np.ndarray,
                           wall_thickness_um: float = None,
                           wall_material: str = 'alumina',
                           base_material: str = 'silver',
-                          photon_wavelength_um: float = None) -> float:
+                          photon_wavelength_um: float = None,
+                          use_complex_fresnel: bool = False,
+                          apply_modal_attenuation: bool = False,
+                          geometry_diameter_um: float = None) -> float:
     """Trace one photon with thin-film physics corrections.
     
     Extended version of _trace_photon that applies TMM-based thin-film
-    emissivity for optically thin walls.
+    emissivity for optically thin walls and optionally applies modal
+    attenuation from Phase 2 integration.
     
     Parameters
     ----------
@@ -182,6 +221,9 @@ def _trace_photon_thin_film(pos: np.ndarray,
     wall_material     : wall material identifier.
     base_material     : base material identifier.
     photon_wavelength_um : photon wavelength in µm (required for thin-film).
+    use_complex_fresnel : if True, use complex Fresnel instead of effective emissivity.
+    apply_modal_attenuation : if True, apply Phase 2 modal attenuation weighting.
+    geometry_diameter_um : cavity diameter for modal calculations (µm).
     
     Returns
     -------
@@ -191,6 +233,8 @@ def _trace_photon_thin_film(pos: np.ndarray,
 
     bounces = 0
     total_steps = 0
+    last_bounce_pos = np.array(pos)  # Track position for modal attenuation calculation
+    
     while bounces < _MAX_BOUNCES and total_steps < _MAX_PHOTON_STEPS:
         total_steps += 1
         t, surface, normal = geometry.next_hit(pos, direction)
@@ -205,6 +249,7 @@ def _trace_photon_thin_film(pos: np.ndarray,
                 direction = sample_hemisphere_3d(np.array([0.0, 0.0, -1.0]))
                 pos = pos - np.array([0.0, 0.0, 1e-12])
                 bounces += 1
+                last_bounce_pos = np.array(pos)
                 continue
             return weight
 
@@ -217,10 +262,44 @@ def _trace_photon_thin_film(pos: np.ndarray,
 
         bounces += 1
 
-        # Calculate effective emissivity with thin-film correction
+        # Phase 2 Integration: Apply modal attenuation for internal bounces
+        if apply_modal_attenuation and surface != 'aperture' and photon_wavelength_um is not None and geometry_diameter_um is not None:
+            try:
+                modal = solve_te11_mode_complex(geometry_diameter_um, photon_wavelength_um, wall_material)
+                # Calculate distance traveled since last bounce
+                distance_since_last_bounce_um = (np.linalg.norm(pos - last_bounce_pos)) * 1e6  # Convert to micrometers
+                attenuation = attenuation_factor_lossy_waveguide(distance_since_last_bounce_um, modal)
+                weight *= attenuation
+                
+                # Apply Russian Roulette after attenuation
+                if weight < _RR_THRESHOLD:
+                    if np.random.random() < weight / _RR_BOOST:
+                        weight = _RR_BOOST
+                    else:
+                        return 0.0
+            except Exception:
+                # Proceed without attenuation if modal calculation fails
+                pass
+
+        # Calculate effective emissivity with thin-film correction or complex Fresnel
         if surface == 'wall' or surface == 'top_cap':
-            if wall_thickness_um is not None and photon_wavelength_um is not None:
-                # Apply thin-film correction
+            if use_complex_fresnel and wall_thickness_um is not None and photon_wavelength_um is not None:
+                # Phase 1: Use complex Fresnel reflectance
+                try:
+                    n_real, k_imag = get_complex_refractive_index(wall_material, photon_wavelength_um)
+                    n_complex = n_real + 1.0j * k_imag
+                    R = tmm_reflectance_single_layer(
+                        n_0=1.0 + 0.0j,
+                        n_1=n_complex,
+                        n_2=n_complex,
+                        thickness_um=wall_thickness_um,
+                        wavelength_um=photon_wavelength_um
+                    )
+                    eps = float(np.clip(R, 0.0, 1.0))
+                except Exception:
+                    eps = eps_walls_bulk
+            elif wall_thickness_um is not None and photon_wavelength_um is not None:
+                # Phase 1: Use effective emissivity thin-film model
                 eps = effective_emissivity_thin_film(
                     bulk_emissivity=eps_walls_bulk,
                     thickness_um=wall_thickness_um,
@@ -231,7 +310,22 @@ def _trace_photon_thin_film(pos: np.ndarray,
                 # Bulk assumption (backward compatibility)
                 eps = eps_walls_bulk
         elif surface == 'base':
-            if photon_wavelength_um is not None:
+            if use_complex_fresnel and photon_wavelength_um is not None:
+                try:
+                    n_real, k_imag = get_complex_refractive_index(base_material, photon_wavelength_um)
+                    n_complex = n_real + 1.0j * k_imag
+                    base_thickness_um = 100.0
+                    R = tmm_reflectance_single_layer(
+                        n_0=1.0 + 0.0j,
+                        n_1=n_complex,
+                        n_2=n_complex,
+                        thickness_um=base_thickness_um,
+                        wavelength_um=photon_wavelength_um
+                    )
+                    eps = float(np.clip(R, 0.0, 1.0))
+                except Exception:
+                    eps = eps_base_bulk
+            elif photon_wavelength_um is not None:
                 # Base is typically thick substrate, but apply correction anyway
                 eps = effective_emissivity_thin_film(
                     bulk_emissivity=eps_base_bulk,
@@ -254,6 +348,7 @@ def _trace_photon_thin_film(pos: np.ndarray,
 
         direction = sample_hemisphere_3d(normal)
         pos = pos + normal * 1e-13
+        last_bounce_pos = np.array(pos)
 
     # A safety-cap exit is not material absorption. Preserve the surviving
     # weight so the absorptivity estimator does not count an unresolved,
@@ -321,10 +416,13 @@ def run_cavity_mc_3d(
     T_emit:         float = 300.0, # plate B temperature — Planck spectrum for emission
     T_inc:          float = 600.0, # plate A temperature — Planck spectrum for incidence
     alpha_top:      float = None,  # top-surface absorptivity for sub-cutoff incident light
-    # Thin-film physics parameters (NEW)
+    # Thin-film physics parameters (PHASE 1)
     wall_thickness_um: float = None,  # wall thickness in µm (None = bulk)
     wall_material: str = 'alumina',   # material identifier
     base_material: str = 'silver',    # base material identifier
+    use_complex_fresnel: bool = False,  # use complex Fresnel instead of effective emissivity (Phase 1)
+    # Modal attenuation parameters (PHASE 2)
+    apply_modal_attenuation: bool = False,  # enable Phase 2 modal loss weighting
 ) -> dict:
     """Run the two cavity MC experiments and compute ε_B and α_eff.
 
@@ -358,6 +456,11 @@ def run_cavity_mc_3d(
     T_inc          : temperature [K] used for the incident-radiation spectrum.
     alpha_top      : absorptivity of the top surface for sub-cutoff incidence
                      (None → eps_walls).
+    wall_thickness_um : wall thickness for Phase 1 thin-film/complex Fresnel (µm).
+    wall_material  : wall material for complex refractive index lookup.
+    base_material  : base material for complex refractive index lookup.
+    use_complex_fresnel : if True, use complex Fresnel reflectance (Phase 1).
+    apply_modal_attenuation : if True, apply Phase 2 modal loss weighting.
 
     Returns
     -------
@@ -366,7 +469,7 @@ def run_cavity_mc_3d(
       alpha_eff, alpha_eff_ci95    : effective absorptivity and 95% CI
       epsilon_b, epsilon_b_raw     : effective emissivity (physical emission)
       epsilon_b_ci95               : 95% CI on ε_B
-    cavity_enhancement           : (A_walls + A_base) / A_aperture
+      cavity_enhancement           : (A_walls + A_base) / A_aperture
       kirchhoff_error              : |ε_B - α_eff| / α_eff * 100 [%]
       f_prop_emit, f_prop_inc      : sampled propagating-mode fractions
       n_evan                       : number of evanescent (confined) photons
@@ -383,6 +486,14 @@ def run_cavity_mc_3d(
 
     # Waveguide cutoff of this channel geometry (µm)
     lambda_c_um = float(getattr(geometry, 'lambda_c_um', float('inf')))
+    
+    # Get cavity diameter for modal calculations (Phase 2)
+    geometry_diameter_um = None
+    if apply_modal_attenuation:
+        if hasattr(geometry, 'diameter_um'):
+            geometry_diameter_um = geometry.diameter_um
+        elif hasattr(geometry, 'P'):  # CNT forest cell
+            geometry_diameter_um = geometry.P
 
     # ---- Experiment 1: Internal emission -----------------------------------
     A_walls  = geometry.area_walls
@@ -417,7 +528,10 @@ def run_cavity_mc_3d(
                 wall_thickness_um=wall_thickness_um,
                 wall_material=wall_material,
                 base_material=base_material,
-                photon_wavelength_um=lam
+                photon_wavelength_um=lam,
+                use_complex_fresnel=use_complex_fresnel,
+                apply_modal_attenuation=apply_modal_attenuation,
+                geometry_diameter_um=geometry_diameter_um
             )
         else:
             n_evan += 1
@@ -483,7 +597,10 @@ def run_cavity_mc_3d(
                 wall_thickness_um=wall_thickness_um,
                 wall_material=wall_material,
                 base_material=base_material,
-                photon_wavelength_um=lam
+                photon_wavelength_um=lam,
+                use_complex_fresnel=use_complex_fresnel,
+                apply_modal_attenuation=apply_modal_attenuation,
+                geometry_diameter_um=geometry_diameter_um
             )
             a = 1.0 - w          # absorbed fraction of this photon
         else:

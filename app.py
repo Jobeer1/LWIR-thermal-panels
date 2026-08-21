@@ -82,6 +82,12 @@ def simulate():
             wave_model = 'ray'
         cache_path = str(data.get('cache_path', '')).strip()
 
+        # ---- Phase 3 (Polder-Van Hove near-field) parameters ----------------
+        enable_near_field = str(data.get('enable_near_field', 'true')).lower() in ('true','1','on','yes')
+        near_field_threshold = float(data.get('near_field_threshold', 5.0))
+        near_field_n_omega = int(data.get('near_field_n_omega', 80))
+        near_field_n_kparallel = int(data.get('near_field_n_kparallel', 50))
+
         results = run_simulation(
             geometry_mode    = geometry_mode,
             cavity_diameter  = cavity_diameter,
@@ -111,6 +117,11 @@ def simulate():
             material_b       = material_b,
             wave_model       = wave_model,
             cache_path       = cache_path,
+            # Phase 3 parameters
+            enable_near_field = enable_near_field,
+            near_field_threshold = near_field_threshold,
+            near_field_n_omega = near_field_n_omega,
+            near_field_n_kparallel = near_field_n_kparallel,
         )
         return jsonify({'status': 'success', 'results': results})
 

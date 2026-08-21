@@ -23,8 +23,48 @@ from geometry    import RectPit3D, FrustumCavity3D, CNTForestCell, HoneycombCavi
 from ray_tracer  import run_cavity_mc_3d
 from spectral    import planck_weighted_emissivity, MATERIAL_EMISSIVITY, effective_emissivity_pair
 from sampling    import planck_cumulative, planck_averaged_evanescent_decay
+from near_field_radiative_heat import (
+    gap_ratio_metric,
+    should_use_near_field_model,
+    near_field_heat_flux_spectral
+)
 
 SIGMA = 5.670374419e-8  # Stefan-Boltzmann constant, W m⁻² K⁻⁴
+
+
+# ---------------------------------------------------------------------------
+# Gap Regime Detection (Phase 3)
+# ---------------------------------------------------------------------------
+
+def _detect_gap_regime(gap_m: float, T_hot_K: float, threshold: float = 5.0) -> dict:
+    """Auto-detect far-field vs. near-field based on gap ratio.
+    
+    Uses Polder-Van Hove dimensionless metric: gap / (λ_peak / 2π).
+    
+    Parameters
+    ----------
+    gap_m : float
+        Gap distance (m)
+    T_hot_K : float
+        Hot surface temperature (K) for Wien's peak wavelength
+    threshold : float
+        Gap ratio threshold for near-field activation (default 5.0)
+        Typically: < 1 = strong near-field, < 5 = significant correction
+    
+    Returns
+    -------
+    dict with:
+        'gap_ratio': dimensionless ratio
+        'use_near_field': bool indicating if near-field model should be used
+        'regime': 'near-field' or 'far-field' label
+    """
+    gap_ratio = gap_ratio_metric(gap_m, T_hot_K)
+    use_near_field = should_use_near_field_model(gap_m, T_hot_K, threshold)
+    return {
+        'gap_ratio': gap_ratio,
+        'use_near_field': use_near_field,
+        'regime': 'near-field' if use_near_field else 'far-field'
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +330,11 @@ def run_simulation(
     # Phase 0/6 — wave-model integration boundary
     wave_model: str = 'ray',          # 'ray' (default fallback) | 'cached'
     cache_path: str = '',             # optional explicit path to WaveResponse (.json/.h5)
+    # Phase 3 — Polder-Van Hove near-field integration
+    enable_near_field: bool = True,  # Auto-switch on/off
+    near_field_threshold: float = 5.0,  # Gap ratio threshold
+    near_field_n_omega: int = 80,  # Quadrature points for frequency
+    near_field_n_kparallel: int = 50,  # Quadrature points for parallel k
 ) -> dict:
     """Run the full two-plate radiative exchange simulation.
 
@@ -297,6 +342,10 @@ def run_simulation(
         * 'ray'    (default) — the 3-D Monte Carlo ray tracer (Phase-0 fallback);
         * 'cached'           — bypass MC and interpolate effective α(λ)/ε_b(λ)
                                from a pre-computed full-wave WaveResponse cache.
+    
+    ``enable_near_field`` controls Phase 3 (Polder-Van Hove near-field integration):
+        * True (default) — auto-detect and use near-field for small gaps (g < 5λ/2π);
+        * False          — always use far-field (radiosity) model.
     """
 
         # ---- Build cavity geometry -------------------------------------------
@@ -356,6 +405,56 @@ def run_simulation(
 
     # ---- Near-field warning (Bug #8) ------------------------------------
     nf = _near_field_check(gap_m, max(temp_a, temp_b))
+
+    # ---- Phase 3 Integration: Gap regime detection and near-field switch ----
+    if enable_near_field:
+        regime_info = _detect_gap_regime(gap_m, max(temp_a, temp_b), near_field_threshold)
+        
+        if regime_info['use_near_field']:
+            # Attempt to use Polder-Van Hove near-field model
+            try:
+                nf_result = near_field_heat_flux_spectral(
+                    temperature_hot_K=float(temp_a),
+                    temperature_cold_K=float(temp_b),
+                    gap_m=gap_m,
+                    material_hot='alumina' if geometry_mode == 'honeycomb' else 'cnt_forest',
+                    material_cold='alumina' if geometry_mode == 'honeycomb' else 'cnt_forest',
+                    n_omega=near_field_n_omega,
+                    n_kparallel=near_field_n_kparallel
+                )
+                
+                # Build results dict with near-field data
+                results = {
+                    # Phase 3 near-field results
+                    'physics_regime': 'near-field',
+                    'gap_ratio': regime_info['gap_ratio'],
+                    'net_flux_near_field_W_m2': nf_result['flux_W_m2'],
+                    'evanescent_fraction': nf_result['evanescent_fraction'],
+                    'evanescent_flux_W_m2': nf_result['flux_by_region']['evanescent_W_m2'],
+                    'propagating_flux_W_m2': nf_result['flux_by_region']['propagating_W_m2'],
+                    'dominant_wavelength_um': nf_result['dominant_wavelength_um'],
+                    'peak_k_parallel_m': nf_result['peak_contribution_k_parallel_m'],
+                    'phase_3_materials': nf_result['materials'],
+                    'phase_3_integration_info': nf_result['integration_info'],
+                }
+                
+                # Return near-field results (fallback to radiosity below if needed)
+                near_field_results = results.copy()
+                use_near_field_exclusively = False  # Keep fallback logic
+                
+            except Exception as e:
+                import warnings
+                warnings.warn(f"Near-field calculation failed: {e}. Falling back to far-field.")
+                regime_info['use_near_field'] = False
+                near_field_results = None
+                use_near_field_exclusively = False
+        else:
+            near_field_results = None
+            use_near_field_exclusively = False
+    else:
+        regime_info = {'gap_ratio': gap_ratio_metric(gap_m, max(temp_a, temp_b)), 'use_near_field': False, 'regime': 'far-field (disabled)'}
+        near_field_results = None
+        use_near_field_exclusively = False
 
     # ---- Spectral emissivities (Bug #7) ----------------------------------
     mat_a = material_a if material_a in MATERIAL_EMISSIVITY else None
@@ -605,6 +704,14 @@ def run_simulation(
         coupling_mc = float(f_ab_mc) * float(alpha_eff)
 
     return {
+        # Phase 3 Integration Results
+        'physics_regime': regime_info.get('regime', 'far-field'),
+        'gap_ratio': regime_info.get('gap_ratio', 0.0),
+        'net_flux_near_field_W_m2': near_field_results.get('net_flux_near_field_W_m2', 0.0) if near_field_results else 0.0,
+        'evanescent_fraction': near_field_results.get('evanescent_fraction', 0.0) if near_field_results else 0.0,
+        'evanescent_flux_W_m2': near_field_results.get('evanescent_flux_W_m2', 0.0) if near_field_results else 0.0,
+        'propagating_flux_W_m2': near_field_results.get('propagating_flux_W_m2', 0.0) if near_field_results else 0.0,
+        
         # Solver provenance (Phase 0/6 integration boundary)
         'wave_model':             wave_model,
         'solver_mode':            solver_mode,
