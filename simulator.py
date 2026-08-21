@@ -287,8 +287,17 @@ def run_simulation(
     material_b: str = '',
     # Bug #13 — wave-optics modal cutoff (peer review)
     alpha_top: float = None,          # top-surface absorptivity for sub-λ_c incidence
+    # Phase 0/6 — wave-model integration boundary
+    wave_model: str = 'ray',          # 'ray' (default fallback) | 'cached'
+    cache_path: str = '',             # optional explicit path to WaveResponse (.json/.h5)
 ) -> dict:
-    """Run the full two-plate radiative exchange simulation."""
+    """Run the full two-plate radiative exchange simulation.
+
+    ``wave_model`` selects the cavity-absorption solver:
+        * 'ray'    (default) — the 3-D Monte Carlo ray tracer (Phase-0 fallback);
+        * 'cached'           — bypass MC and interpolate effective α(λ)/ε_b(λ)
+                               from a pre-computed full-wave WaveResponse cache.
+    """
 
         # ---- Build cavity geometry -------------------------------------------
     if geometry_mode == 'honeycomb':
@@ -300,7 +309,7 @@ def run_simulation(
         )
         pitch = cavity_diameter + wall_thickness
         label = (f'Honeycomb Cavity (D={cavity_diameter:.1f}µm, H={height:.1f}µm, '
-                 f'w={wall_thickness:.2f}µm, pitch={pitch:.1f}µm, '
+                 f'w={wall_thickness:.3f}µm, pitch={pitch:.3f}µm, '
                  f'AR={height/max(cavity_diameter,1e-9):.1f}, f={packing_fraction:.4f})')
     elif geometry_mode == 'cnt_forest':
         # cnt_pitch is in µm; cnt_dia_base/top still in nm
@@ -358,9 +367,8 @@ def run_simulation(
     eps_a_eff = spectral['eps_a_spectral']
     # We'll use the scalar ε_b from MC; spectral info is supplemental
 
-        # ---- Cavity MC (Bugs #1,#4,#9,#11,#13) via ray_tracer --------------------
-    # Aperture re-entry probability ≈ (1-ε_A)·F_{A→B}
-    re_entry = (1.0 - float(emissivity_a)) * F_af_b
+        # ---- Cavity response: MC ray tracing (default) OR cached full-wave ----------
+    # Aperture re-entry probability ≈ (1-ε_A)·F_{A→B}  (MC path only)
 
     # Bug #13 — graded-index / diffractive top-surface capture for sub-cutoff
     # incident light (α_eff → 1).  Sub-wavelength waves fold around the wall
@@ -372,17 +380,53 @@ def run_simulation(
         alpha_top_def = float(alpha_top)
     alpha_top_def = float(np.clip(alpha_top_def, 0.0, 1.0))
 
-    mc = run_cavity_mc_3d(
-        geometry       = geometry,
-        n_photons      = n_photons,
-        eps_walls      = float(alpha_cnt),
-        eps_base       = float(alpha_ag),
-        eps_aperture   = float(emissivity_a),
-        view_factor_ab = F_af_b,
-        T_emit         = float(temp_b),
-        T_inc          = float(temp_a),
-        alpha_top      = alpha_top_def,
-    )
+    if wave_model == 'cached':
+        # ---- Cached full-wave path (Phase 6 service layer) ----------------------
+        # Bypass the Monte Carlo tracer: interpolate the effective absorptivity
+        # α_eff (for incident Plate-A radiation) and effective emissivity ε_b (for
+        # Plate-B thermal emission) directly from a pre-computed WaveResponse.
+        # The radiosity layer below consumes these exactly as it would ray results.
+        from wave_physics.cached_solver import CachedWaveSolver, ensure_default_cache
+        from wave_physics.analytic_benchmarks import geometric_cavity_enhancement
+
+        cache_source = cache_path or ensure_default_cache()
+        cached = CachedWaveSolver(cache_source)
+        cached_info = cached.info()
+
+        alpha_eff_cav   = float(cached.alpha_eff(temperature_K=float(temp_a)))
+        epsilon_b_raw_c = float(cached.epsilon_b(temperature_K=float(temp_b)))
+        mc = {
+            'p_esc':              None,
+            'p_esc_ci95':         0.0,
+            'alpha_eff':          alpha_eff_cav,
+            'alpha_eff_ci95':     0.0,
+            'epsilon_b_raw':      epsilon_b_raw_c,
+            'epsilon_b_ci95':     0.0,
+            'cavity_enhancement': geometric_cavity_enhancement(
+                geometry.area_walls, geometry.area_base, geometry.area_aperture),
+            'kirchhoff_error':    0.0,
+            'n_evan':             0,
+        }
+        solver_mode = 'cached'
+    else:
+        # ---- Monte Carlo ray-tracing path (Phase-0 default fallback) ------------
+        solver_mode = 'ray'
+        re_entry = (1.0 - float(emissivity_a)) * F_af_b
+        mc = run_cavity_mc_3d(
+            geometry       = geometry,
+            n_photons      = n_photons,
+            eps_walls      = float(alpha_cnt),
+            eps_base       = float(alpha_ag),
+            eps_aperture   = float(emissivity_a),
+            view_factor_ab = F_af_b,
+            T_emit         = float(temp_b),
+            T_inc          = float(temp_a),
+            alpha_top      = alpha_top_def,
+            # Thin-film physics parameters
+            wall_thickness_um = wall_thickness,
+            wall_material     = 'alumina' if geometry_mode == 'honeycomb' else 'cnt_forest',
+            base_material     = 'silver',
+        )
 
     p_esc              = mc['p_esc']
     p_esc_ci95         = mc['p_esc_ci95']
@@ -404,7 +448,16 @@ def run_simulation(
     # diagnostic of how far a naive emission ray-count under-predicts the true
     # effective emissivity.  The PHYSICAL emissivity is set by Kirchhoff's law
     # below because Plate B is an isothermal, reciprocal body.
-    epsilon_b_raw_cav  = mc['epsilon_b_raw']
+    # In the fully propagating regime, external absorption and thermal
+    # emission are reciprocal.  The external estimator has much lower
+    # variance for deep cavities than C_e * p_esc, so use it for the cavity
+    # emissivity.  Retain the internal-emission estimator when modal
+    # confinement is active, where directional decoupling is intentional.
+    fully_propagating = f_prop_emit_an >= 0.99999
+    epsilon_b_raw_cav  = (
+        mc['alpha_eff'] if fully_propagating
+        else mc['epsilon_b_raw']
+    )
     epsilon_b_raw_ci95 = mc.get('epsilon_b_ci95', 0.0)
     g_em, rim_frac, delta_avg_um = _modal_emission_gate(
         geometry, lambda_c_um, temp_b, alpha_cnt, alpha_ag, f_prop_emit_an)
@@ -439,12 +492,15 @@ def run_simulation(
     #     thin wall rims and are trapped by the graded-index surface (α_eff → 1).
     #
     #   • EMITTED light (ε_B path): deep-cavity thermal modes below the
-    #     waveguide cutoff λ_c are evanescent and decay as exp(−L/δ_ev)
+    #     waveguide cutoff λ_c are evanescent and transmit power as
+    #     exp(−2L/δ_ev)
     #     (LDOS suppression — Lin PRB 2000; Narayanaswamy & Chen PRB 2004).
     #     Only the shallow rim strip (within one δ_ev) and the propagating
     #     spectral fraction escape; the deep walls are dark.
     #
     # Therefore ε_B << α_eff — the operational decoupling of structured emitters.
+    if fully_propagating:
+        g_em = 1.0
     g_em      = float(g_em)                # LDOS confinement gate [0, 1]
     rim_frac  = float(rim_frac)            # fraction of emitter area that is "rim"
     if geometry_mode == 'honeycomb':
@@ -549,6 +605,10 @@ def run_simulation(
         coupling_mc = float(f_ab_mc) * float(alpha_eff)
 
     return {
+        # Solver provenance (Phase 0/6 integration boundary)
+        'wave_model':             wave_model,
+        'solver_mode':            solver_mode,
+        'wave_response_info':     cached_info if wave_model == 'cached' else None,
         # MC results
         'p_esc':                  p_esc,
         'p_esc_ci95':             p_esc_ci95,

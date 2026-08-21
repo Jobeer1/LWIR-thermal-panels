@@ -125,7 +125,7 @@
                             </div>
                             <div class="input-group">
                                 <label for="wall_thickness">Wall Thickness (µm)</label>
-                                <input type="number" id="wall_thickness" name="wall_thickness" value="1" step="0.1" min="0.001">
+                                <input type="number" id="wall_thickness" name="wall_thickness" value="1" step="0.001" min="0.051">
                             </div>
                         </div>
                         <div class="input-row">
@@ -194,7 +194,7 @@
                     <div class="input-row">
                         <div class="input-group">
                             <label for="n_photons">Photons / experiment <span class="label-note">(max 200k)</span></label>
-                            <input type="number" id="n_photons" name="n_photons" value="20000" step="1000" max="200000" min="1000" required>
+                            <input type="number" id="n_photons" name="n_photons" value="1000" step="1000" max="200000" min="1000" required>
                         </div>
                     </div>
 
@@ -208,8 +208,20 @@
                     <div class="input-row" id="gap-mc-row" style="display:none;">
                         <div class="input-group">
                             <label for="n_gap_photons">Gap MC Photons</label>
-                            <input type="number" id="n_gap_photons" name="n_gap_photons" value="20000" step="1000" max="100000" min="1000">
+                            <input type="number" id="n_gap_photons" name="n_gap_photons" value="1000" step="1000" max="100000" min="1000">
                         </div>
+                    </div>
+
+                    <!-- ========== WAVE-MODEL SOLVER SELECTOR (Phase 0/6) ========== -->
+                    <div class="section-label">Cavity Solver</div>
+                    <div class="input-group">
+                        <label for="wave_model">Solver Mode
+                            <span class="label-note">full-wave path</span>
+                        </label>
+                        <select id="wave_model" name="wave_model" class="select-input">
+                            <option value="ray">Ray Tracing (Monte Carlo fallback)</option>
+                            <option value="cached">Cached Full-Wave (pre-computed table)</option>
+                        </select>
                     </div>
 
                     <button type="submit" id="run-btn">
@@ -222,7 +234,15 @@
 
             <!-- ===================== RIGHT: RESULTS PANEL ================== -->
             <section class="glass-panel results-panel">
-                <h2>📊 Results</h2>
+                <div class="results-heading">
+                    <h2>📊 Results</h2>
+                    <span id="solver-badge" class="solver-badge solver-ray" title="Which solver produced the cavity absorption/emission data">
+                        Solver Mode: Ray Tracing (Fallback)
+                    </span>
+                    <button type="button" id="download-report-btn" class="secondary-btn" disabled title="Download simulation inputs and outputs as a text file">
+                        <span aria-hidden="true">↓</span> Download Report
+                    </button>
+                </div>
 
                 <!-- Warning banners -->
                 <div id="near-field-banner" class="warning-banner hidden"></div>
@@ -369,7 +389,7 @@
                         T<sub>A</sub> and tested against the channel's modal cutoff λ<sub>c</sub>
                         (TE11/TE10). When a pore's thermal wavelengths exceed its cutoff,
                         deep thermal modes become evanescent: internally-emitted photons above
-                        λ<sub>c</sub> become evanescent waves that decay as exp(−L/δ<sub>ev</sub>)
+                        λ<sub>c</sub> become evanescent waves whose power decays as exp(−2L/δ<sub>ev</sub>)
                         and fail to reach the aperture (LDOS suppression — Lin PRB 2000;
                         Narayanaswamy &amp; Chen PRB 2004). The reported propagating fraction and
                         rim contribution are calculated for the selected geometry.</p>

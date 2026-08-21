@@ -12,6 +12,38 @@ const modeBtns = document.querySelectorAll('.mode-btn');
 const modeInput = document.getElementById('geometry_mode');
 const fieldsHoneycomb = document.getElementById('fields-honeycomb');
 const fieldsForest  = document.getElementById('fields-forest');
+let lastSimulation = null;
+
+const downloadReportBtn = document.getElementById('download-report-btn');
+if (downloadReportBtn) {
+    downloadReportBtn.addEventListener('click', () => {
+        if (!lastSimulation) return;
+
+        const report = [
+            'Monte Carlo Radiative Exchange Simulation Report',
+            `Generated: ${new Date().toLocaleString()}`,
+            '',
+            'INPUT VARIABLES',
+            '==============',
+            JSON.stringify(lastSimulation.inputs, null, 2),
+            '',
+            'OUTPUT VARIABLES',
+            '================',
+            JSON.stringify(lastSimulation.outputs, null, 2),
+            '',
+        ].join('\n');
+
+        const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `radiative-simulation-${new Date().toISOString().slice(0, 10)}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    });
+}
 
 function switchMode(mode) {
     modeInput.value = mode;
@@ -83,6 +115,8 @@ document.getElementById('sim-form').addEventListener('submit', async (e) => {
         const result = await response.json();
 
         if (result.status === 'success') {
+            lastSimulation = { inputs: data, outputs: result.results };
+            if (downloadReportBtn) downloadReportBtn.disabled = false;
             _renderResults(result.results);
         } else {
             alert('Simulation error:\n' + result.message +
@@ -105,8 +139,11 @@ document.getElementById('sim-form').addEventListener('submit', async (e) => {
 // ---- Result rendering ---------------------------------------------------
 
 function _renderResults(r) {
+    // Solver-mode badge (Phase 6): ray fallback vs cached full-wave
+    _updateSolverBadge(r.solver_mode, r.wave_model, r.wave_response_info);
+
     // MC results
-    const pEsc     = (r.p_esc     * 100).toFixed(3);
+    const pEsc     = (r.p_esc != null) ? (r.p_esc     * 100).toFixed(3) : '—';
     const aEff     = (r.alpha_eff * 100).toFixed(3);
     const epsilonB = (r.epsilon_b * 100).toFixed(3);
     const kErr     = (Number(r.kirchhoff_error) * 100).toFixed(2);
@@ -159,16 +196,21 @@ function _renderResults(r) {
         _setText('res-omega', Number(r.escape_solid_angle_sr).toExponential(2) + ' sr');
 
     // 95% Confidence intervals
+    const isCached = r.solver_mode === 'cached';
     if (r.p_esc_ci95 != null) {
-        _setText('ci-pesc',  `±${(r.p_esc_ci95 * 100).toFixed(4)}% (95% CI)`);
+        _setText('ci-pesc', isCached
+            ? 'deterministic (cached table)'
+            : `±${(r.p_esc_ci95 * 100).toFixed(4)}% (95% CI)`);
     }
     if (r.alpha_eff_ci95 != null) {
-        _setText('ci-alpha', `±${(r.alpha_eff_ci95 * 100).toFixed(4)}% (95% CI)`);
+        _setText('ci-alpha', isCached
+            ? 'deterministic (cached table)'
+            : `±${(r.alpha_eff_ci95 * 100).toFixed(4)}% (95% CI)`);
     }
     if (r.epsilon_b_ci95 != null) {
-        _setText('ci-epsb', Number(r.epsilon_b_ci95) > 0
-            ? `±${(r.epsilon_b_ci95 * 100).toFixed(4)}% (95% CI)`
-            : 'deterministic macro operator');
+        _setText('ci-epsb', isCached || Number(r.epsilon_b_ci95) <= 0
+            ? 'deterministic macro operator'
+            : `±${(r.epsilon_b_ci95 * 100).toFixed(4)}% (95% CI)`);
     }
         // ε_B < α_eff (anisotropic decoupling — the correct physics)
     if (r.epsilon_b_cavity_part != null || r.epsilon_b_flat_part != null) {
@@ -190,7 +232,7 @@ function _renderResults(r) {
 
     // Wall thickness — dynamic footnote value (replaces hardcoded "0.3 µm")
     _setText('wall-thickness-val', r.wall_thickness_um != null
-        ? r.wall_thickness_um.toFixed(2) : '—');
+        ? r.wall_thickness_um.toFixed(3) : '—');
 
     // Kirchhoff card colour: reflects the anisotropic decoupling ratio
     const kCard = document.getElementById('kirchhoff-card');
@@ -213,6 +255,32 @@ function _renderResults(r) {
     // Near-field warning
     if (r.near_field_warning) {
         _showBanner('near-field-banner', r.near_field_warning);
+    }
+}
+
+// ---- Solver-mode badge (Phase 6 UI indicator) ------------------------------
+
+function _updateSolverBadge(solverMode, waveModel, waveInfo) {
+    const badge = document.getElementById('solver-badge');
+    if (!badge) return;
+
+    const mode = (solverMode || waveModel || 'ray');
+    if (mode === 'cached') {
+        badge.className = 'solver-badge solver-cached';
+        let label = 'Solver Mode: Cached Full-Wave';
+        if (waveInfo && waveInfo.energy_conservation_ok) {
+            label += ' ✓';
+        }
+        badge.title = waveInfo
+            ? `Cache: ${waveInfo.source} · grid ${JSON.stringify(waveInfo.response_shape)} · ` +
+              `max δE ${Number(waveInfo.energy_balance_error).toExponential(1)} · ` +
+              `λ ${Number(waveInfo.wavelength_range_um[0]).toFixed(2)}–${Number(waveInfo.wavelength_range_um[1]).toFixed(1)} µm`
+            : 'Pre-computed full-wave response table';
+        badge.textContent = label;
+    } else {
+        badge.className = 'solver-badge solver-ray';
+        badge.textContent = 'Solver Mode: Ray Tracing (Fallback)';
+        badge.title = 'Monte Carlo 3-D ray tracer';
     }
 }
 

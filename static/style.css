@@ -4,14 +4,14 @@
 
 /* ---------- CSS Custom Properties ---------- */
 :root {
-    --bg:            #f1f6f3;
-    --panel:         rgba(255, 255, 255, 0.92);
+    --bg:            #e7f7ef;
+    --panel:         rgba(255, 255, 255, 0.97);
     --panel-hover:   #ffffff;
     --border:        rgba(0, 35, 149, 0.14);
     --border-accent: rgba(0, 122, 77, 0.38);
     --text:          #17231d;
-    --text-dim:      #526158;
-    --text-muted:    #77857c;
+    --text-dim:      #465c50;
+    --text-muted:    #6b8174;
 
     --blue:          #002395;
     --gold:          #e5a900;
@@ -73,8 +73,8 @@ body {
     position: absolute;
     inset: 0;
     opacity: 0.32;
-    background-image: linear-gradient(rgba(0, 122, 77, 0.045) 1px, transparent 1px),
-                      linear-gradient(90deg, rgba(0, 35, 149, 0.035) 1px, transparent 1px);
+    background-image: linear-gradient(rgba(0, 122, 77, 0.07) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(0, 35, 149, 0.055) 1px, transparent 1px);
     background-size: 34px 34px;
 }
 
@@ -89,6 +89,59 @@ body {
     max-width: 1200px;
     z-index: 1;
 }
+
+.results-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.results-heading h2 { margin-bottom: 0; }
+
+/* -------- Solver-mode badge (Phase 6 UI indicator) -------- */
+.solver-badge {
+    display: inline-block;
+    padding: 0.42rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    cursor: help;
+}
+.solver-badge.solver-ray {
+    background: rgba(120, 130, 150, 0.10);
+    border: 1px solid rgba(120, 130, 150, 0.35);
+    color: #5b6577;
+}
+.solver-badge.solver-cached {
+    background: rgba(0, 122, 77, 0.12);
+    border: 1px solid rgba(0, 122, 77, 0.40);
+    color: var(--teal);
+}
+
+
+.secondary-btn {
+    border: 1px solid var(--border-accent);
+    border-radius: var(--radius-sm);
+    background: #ffffff;
+    color: var(--teal);
+    padding: 0.6rem 0.85rem;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.secondary-btn:hover:not(:disabled) { background: #edf9f3; }
+
+.secondary-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.secondary-btn span { font-size: 1.1em; }
 
 /* ---------- Header ---------- */
 header {
@@ -188,7 +241,7 @@ header p {
     padding: 0.55rem 0.75rem;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
-    background: rgba(241, 246, 243, 0.8);
+    background: rgba(250, 255, 252, 0.95);
     color: var(--text-dim);
     font-family: inherit;
     font-size: 0.78rem;
@@ -382,7 +435,7 @@ button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* ---------- Result cards ---------- */
 .result-card {
-    background: rgba(241, 246, 243, 0.72);
+    background: rgba(250, 255, 252, 0.9);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 1.1rem 1.1rem 0.9rem;

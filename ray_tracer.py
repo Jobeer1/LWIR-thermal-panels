@@ -19,8 +19,8 @@ Bug #13 (peer-review physics) — spectral MC with waveguide modal cutoff:
     • λ < λ_c  : the mode PROPAGATES → full geometric ray tracing.
     • λ ≥ λ_c  : the mode is EVANESCENT → exponentially-decaying field.
 
-  For internal emission the evanescent photon tunnels to the aperture with
-  transmission T = exp(−L/δ_ev), where L is the path to the aperture plane
+    For internal emission the evanescent photon tunnels to the aperture with
+    power transmission T = exp(−2L/δ_ev), where L is the axial distance to the aperture plane
   and δ_ev = λ_c/(2π)·(1 − (λ_c/λ)²)^−1/2 is the decay length.  Deep
   emission (L ≫ δ_ev) is confined — this is the LDOS suppression of Lin
   et al. (PRB 2000) and the sub-wavelength cutoff of Narayanaswamy & Chen
@@ -48,6 +48,7 @@ from typing import Union
 
 from geometry import RectPit3D, FrustumCavity3D, CNTForestCell
 from sampling  import sample_hemisphere_3d, sample_planck_wavelength
+from material_optics import effective_emissivity_thin_film
 
 AnyGeometry = Union[RectPit3D, FrustumCavity3D, CNTForestCell]
 
@@ -61,7 +62,8 @@ _RR_THRESHOLD = 1e-4
 _RR_BOOST = 0.1
 # Maximum bounces before forced termination (should never be reached in practice
 # for realistic high-ε walls; exists only as a safety net)
-_MAX_BOUNCES = 2000
+_MAX_BOUNCES = 250
+_MAX_PHOTON_STEPS = 250
 
 
 def _trace_photon(pos: np.ndarray,
@@ -85,11 +87,26 @@ def _trace_photon(pos: np.ndarray,
                         immediately re-injected downward (models plate A
                         reflection — Bug #9 fix).  Typically (1-ε_A)·F_AB.
     """
+    """Trace one photon from *pos* in *direction* inside *geometry*.
+
+    Returns the photon's surviving energy weight at escape (> 0 means it
+    left through the aperture), or 0 if absorbed.
+
+    Parameters
+    ----------
+    pos, direction    : initial position (m) and unit direction vector.
+    geometry          : cavity geometry object.
+    eps_walls         : wall emissivity / absorptivity.
+    eps_base          : base emissivity / absorptivity.
+    re_entry_prob     : probability that a photon escaping the aperture is
+                        immediately re-injected downward (models plate A
+                        reflection — Bug #9 fix).  Typically (1-ε_A)·F_AB.
+    """
     weight = 1.0
 
     bounces = 0
     total_steps = 0
-    while bounces < _MAX_BOUNCES and total_steps < 1000:
+    while bounces < _MAX_BOUNCES and total_steps < _MAX_PHOTON_STEPS:
         total_steps += 1
         t, surface, normal = geometry.next_hit(pos, direction)
 
@@ -133,7 +150,115 @@ def _trace_photon(pos: np.ndarray,
         direction = sample_hemisphere_3d(normal)
         pos = pos + normal * 1e-13
 
-    return 0.0
+    # A safety-cap exit is not material absorption. Preserve the surviving
+    # weight so the absorptivity estimator does not count an unresolved,
+    # highly reflective path as absorbed.
+    return weight
+
+
+def _trace_photon_thin_film(pos: np.ndarray,
+                          direction: np.ndarray,
+                          geometry: AnyGeometry,
+                          eps_walls_bulk: float,
+                          eps_base_bulk: float,
+                          re_entry_prob: float = 0.0,
+                          wall_thickness_um: float = None,
+                          wall_material: str = 'alumina',
+                          base_material: str = 'silver',
+                          photon_wavelength_um: float = None) -> float:
+    """Trace one photon with thin-film physics corrections.
+    
+    Extended version of _trace_photon that applies TMM-based thin-film
+    emissivity for optically thin walls.
+    
+    Parameters
+    ----------
+    pos, direction    : initial position (m) and unit direction vector.
+    geometry          : cavity geometry object.
+    eps_walls_bulk    : bulk wall emissivity / absorptivity.
+    eps_base_bulk     : bulk base emissivity / absorptivity.
+    re_entry_prob     : probability of aperture re-entry.
+    wall_thickness_um : wall thickness in µm (None = bulk assumption).
+    wall_material     : wall material identifier.
+    base_material     : base material identifier.
+    photon_wavelength_um : photon wavelength in µm (required for thin-film).
+    
+    Returns
+    -------
+    float — surviving weight at escape (>0) or 0 if absorbed.
+    """
+    weight = 1.0
+
+    bounces = 0
+    total_steps = 0
+    while bounces < _MAX_BOUNCES and total_steps < _MAX_PHOTON_STEPS:
+        total_steps += 1
+        t, surface, normal = geometry.next_hit(pos, direction)
+
+        if not math.isfinite(t) or t <= 0.0:
+            return 0.0
+
+        pos = pos + direction * t
+
+        if surface == 'aperture':
+            if re_entry_prob > 0.0 and np.random.random() < re_entry_prob:
+                direction = sample_hemisphere_3d(np.array([0.0, 0.0, -1.0]))
+                pos = pos - np.array([0.0, 0.0, 1e-12])
+                bounces += 1
+                continue
+            return weight
+
+        if surface == 'periodic_x':
+            pos[0] = -np.sign(pos[0]) * (geometry.P / 2 - 1e-13)
+            continue
+        elif surface == 'periodic_y':
+            pos[1] = -np.sign(pos[1]) * (geometry.P / 2 - 1e-13)
+            continue
+
+        bounces += 1
+
+        # Calculate effective emissivity with thin-film correction
+        if surface == 'wall' or surface == 'top_cap':
+            if wall_thickness_um is not None and photon_wavelength_um is not None:
+                # Apply thin-film correction
+                eps = effective_emissivity_thin_film(
+                    bulk_emissivity=eps_walls_bulk,
+                    thickness_um=wall_thickness_um,
+                    wavelength_um=photon_wavelength_um,
+                    material=wall_material
+                )
+            else:
+                # Bulk assumption (backward compatibility)
+                eps = eps_walls_bulk
+        elif surface == 'base':
+            if photon_wavelength_um is not None:
+                # Base is typically thick substrate, but apply correction anyway
+                eps = effective_emissivity_thin_film(
+                    bulk_emissivity=eps_base_bulk,
+                    thickness_um=100.0,  # Assume thick substrate (100µm)
+                    wavelength_um=photon_wavelength_um,
+                    material=base_material
+                )
+            else:
+                eps = eps_base_bulk
+        else:
+            return 0.0
+
+        weight *= (1.0 - eps)
+
+        if weight < _RR_THRESHOLD:
+            if np.random.random() < weight / _RR_BOOST:
+                weight = _RR_BOOST
+            else:
+                return 0.0
+
+        direction = sample_hemisphere_3d(normal)
+        pos = pos + normal * 1e-13
+
+    # A safety-cap exit is not material absorption. Preserve the surviving
+    # weight so the absorptivity estimator does not count an unresolved,
+    # highly reflective path as absorbed.
+    return weight
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +290,23 @@ def evanescent_decay_length(lambda_c_um: float, lambda_um: float) -> float:
     ratio = lambda_c_um / lambda_um     # ∈ (0, 1]
     return (lambda_c_um / (2.0 * math.pi)) / math.sqrt(max(1e-12, 1.0 - ratio * ratio))
 
+
+def evanescent_power_transmission(lambda_c_um: float,
+                                   lambda_um: float,
+                                   length_um: float) -> float:
+    """Return sub-cutoff power transmission through a channel length.
+
+    For an evanescent mode, |E| decays as exp(-κh), so transmitted power
+    carries the required exp(-2κh) factor.  This is a modal approximation,
+    not a geometric ray probability.
+    """
+    if length_um <= 0.0:
+        return 1.0
+    delta_um = evanescent_decay_length(lambda_c_um, lambda_um)
+    if not math.isfinite(delta_um) or delta_um <= 0.0:
+        return 1.0 if length_um <= 0.0 else 0.0
+    return math.exp(-2.0 * length_um / delta_um)
+
 # ---------------------------------------------------------------------------
 # Cavity MC driver
 # ---------------------------------------------------------------------------
@@ -179,6 +321,10 @@ def run_cavity_mc_3d(
     T_emit:         float = 300.0, # plate B temperature — Planck spectrum for emission
     T_inc:          float = 600.0, # plate A temperature — Planck spectrum for incidence
     alpha_top:      float = None,  # top-surface absorptivity for sub-cutoff incident light
+    # Thin-film physics parameters (NEW)
+    wall_thickness_um: float = None,  # wall thickness in µm (None = bulk)
+    wall_material: str = 'alumina',   # material identifier
+    base_material: str = 'silver',    # base material identifier
 ) -> dict:
     """Run the two cavity MC experiments and compute ε_B and α_eff.
 
@@ -188,7 +334,7 @@ def run_cavity_mc_3d(
         Planck distribution at *T_emit*:
           • λ < λ_c  → geometric ray tracing until escape or absorption.
           • λ ≥ λ_c  → the channel mode is EVANESCENT; the photon tunnels to
-                       the aperture with T = exp(−L/δ_ev) (≈0 for deep emission).
+                       the aperture with power T = exp(−2L/δ_ev) (≈0 for deep emission).
     Experiment 2 — External incidence (α_eff):
         Photons enter through the aperture with a Lambertian downward
         distribution; wavelength sampled from Planck at *T_inc*:
@@ -263,28 +409,24 @@ def run_cavity_mc_3d(
         lam = sample_planck_wavelength(T_emit)
         if lam < lambda_c_um:
             n_prop += 1
-            w = _trace_photon(pos, direction, geometry, eps_walls, eps_base, re_entry)
+            w = _trace_photon_thin_film(
+                pos, direction, geometry, 
+                eps_walls_bulk=eps_walls,
+                eps_base_bulk=eps_base,
+                re_entry_prob=re_entry,
+                wall_thickness_um=wall_thickness_um,
+                wall_material=wall_material,
+                base_material=base_material,
+                photon_wavelength_um=lam
+            )
         else:
             n_evan += 1
-            # Sub-cutoff photon: the channel mode is EVANESCENT (cannot
-            # propagate).  Its escape probability factors into
-            #     w = p_geo(escape) × T_tunnel(L, λ)
-            # where p_geo is the geometric aperture-escape probability
-            # (solid angle Ω_esc ≈ π(R/H)², single-bounce re-absorption,
-            # multi-bounce coupling) and T_tunnel = exp(−L/δ_ev) is the
-            # frustrated-tunnelling transmission of the decaying evanescent
-            # field through the L-µm of channel remaining to the aperture
-            # (δ_ev = (λ_c/2π)·(1−(λ_c/λ)²)^−1/2; deep sub-wavelength
-            # channels ⇒ δ_ev ≈ λ_c/2π ≪ 1 → "waves fail to reach the
-            # aperture" — Narayanaswamy & Chen, PRB 2004).
+            # Sub-cutoff photons require a modal calculation.  A geometric
+            # ray is not a valid propagating state here; use power tunneling
+            # through the remaining axial channel length instead.
             L = max(geometry.H - pos[2], 0.0) * 1e6   # µm to aperture plane
             delta_ev = evanescent_decay_length(lambda_c_um, lam)
-            w_geo = _trace_photon(pos, direction, geometry,
-                                  eps_walls, eps_base, re_entry)
-            if math.isfinite(delta_ev) and delta_ev > 0.0:
-                w = w_geo * math.exp(-L / delta_ev)
-            else:
-                w = w_geo if L <= 0.0 else 0.0
+            w = evanescent_power_transmission(lambda_c_um, lam, L)
             tunnel_escape_w += w
         escaped_weight    += w
         escaped_weight_sq += w * w
@@ -333,7 +475,16 @@ def run_cavity_mc_3d(
         if lam < lambda_c_um:
             n_prop_inc += 1
             direction = sample_hemisphere_3d(down)
-            w = _trace_photon(pos, direction, geometry, eps_walls, eps_base, 0.0)
+            w = _trace_photon_thin_film(
+                pos, direction, geometry,
+                eps_walls_bulk=eps_walls,
+                eps_base_bulk=eps_base,
+                re_entry_prob=0.0,
+                wall_thickness_um=wall_thickness_um,
+                wall_material=wall_material,
+                base_material=base_material,
+                photon_wavelength_um=lam
+            )
             a = 1.0 - w          # absorbed fraction of this photon
         else:
             # Sub-cutoff incident wave: cannot form a propagating channel mode.
@@ -348,24 +499,29 @@ def run_cavity_mc_3d(
     alpha_eff_ci95 = 1.96 * math.sqrt(max(var_a / n_photons, 0.0))
 
     # ---- Derived quantities ------------------------------------------------
-    # Classical macro-cavity operator (diffuse-gray opening emissivity):
-    #   eps_cav = eps_wall / [eps_wall + (1 - eps_wall) * (A_ap / A_int)]
-    #
-    # Keep this emissivity distinct from the geometric area enhancement. The
-    # Monte Carlo escape probability is retained as a diagnostic, while the
-    # operator supplies the macro-scale cavity emissivity directly. The
-    # sub-wavelength modal cutoff physics remains unchanged above.
+    # Reciprocity estimator for the cavity emissivity.  The same cavity
+    # surfaces and material emissivities used for internal emission must also
+    # determine external absorptivity; using a wall-only macro operator here
+    # silently drops the base emissivity when eps_walls != eps_base.
     A_int = max(A_walls + A_base, 1e-30)
     aperture_ratio = A_ap / A_int
+    epsilon_mc = (w_total / max(A_ap, 1e-30)) * p_esc
+    epsilon_mc_ci95 = (w_total / max(A_ap, 1e-30)) * p_esc_ci95
+
+    # Retain the gray macro operator as a diagnostic.  It uses an
+    # area-weighted emissivity and is not used as the primary estimator when
+    # wall and base emissivities differ.
+    eps_area_weighted = (A_walls * eps_walls + A_base * eps_base) / A_int
     macro_cavity_eps = float(np.clip(
-        eps_walls / (eps_walls + (1.0 - eps_walls) * aperture_ratio),
+        eps_area_weighted / (eps_area_weighted
+                              + (1.0 - eps_area_weighted) * aperture_ratio),
         0.0, 1.0,
     ))
 
     cavity_enhancement = A_int / A_ap if A_ap > 0 else 0.0
-    epsilon_b_raw      = macro_cavity_eps
+    epsilon_b_raw      = float(np.clip(epsilon_mc, 0.0, 1.0))
     epsilon_b          = epsilon_b_raw
-    epsilon_b_ci95     = 0.0
+    epsilon_b_ci95     = float(np.clip(epsilon_mc_ci95, 0.0, 1.0))
     kirchhoff_error    = (abs(epsilon_b_raw - alpha_eff) / max(alpha_eff, 1e-12)) * 100.0
 
     f_prop_emit = n_prop / n_photons if n_photons > 0 else 0.0
@@ -379,6 +535,7 @@ def run_cavity_mc_3d(
         'epsilon_b':          epsilon_b,
         'epsilon_b_raw':      epsilon_b_raw,
         'epsilon_b_ci95':     epsilon_b_ci95,
+        'epsilon_b_macro':    macro_cavity_eps,
         'cavity_enhancement': cavity_enhancement,
         'kirchhoff_error':    kirchhoff_error,
         'f_prop_emit':        f_prop_emit,

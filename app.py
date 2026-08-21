@@ -34,8 +34,8 @@ def simulate():
         wall_thickness  = float(data.get('wall_thickness', 1.0))    # µm
         if not math.isfinite(cavity_diameter) or cavity_diameter < 0.001:
             raise ValueError('Honeycomb cavity diameter must be at least 0.001 µm (1 nm).')
-        if not math.isfinite(wall_thickness) or wall_thickness <= 0:
-            raise ValueError('Honeycomb wall thickness must be greater than 0 µm.')
+        if not math.isfinite(wall_thickness) or wall_thickness < 0.051:
+            raise ValueError('Honeycomb wall thickness must be at least 0.051 µm.')
 
         # Calculate packing fraction for a hexagonal close-packed array of holes
         pitch_hc = cavity_diameter + wall_thickness
@@ -68,12 +68,19 @@ def simulate():
         material_b = str(data.get('material_b', ''))
 
         # ---- MC settings --------------------------------------------------
-        n_photons = int(data.get('n_photons', 20000))
+        n_photons = int(data.get('n_photons', 1000))
         if n_photons > 200000:
             n_photons = 200000
 
         full_gap_mc  = str(data.get('full_gap_mc', '')).lower() in ('true','1','on','yes')
-        n_gap_photons = int(data.get('n_gap_photons', 20000))
+        n_gap_photons = int(data.get('n_gap_photons', 1000))
+
+        # ---- Wave-model solver selector (Phase 0/6) ------------------------
+        # 'ray' (default fallback, Monte Carlo) or 'cached' (pre-computed full-wave).
+        wave_model = str(data.get('wave_model', 'ray')).strip().lower()
+        if wave_model not in ('ray', 'cached'):
+            wave_model = 'ray'
+        cache_path = str(data.get('cache_path', '')).strip()
 
         results = run_simulation(
             geometry_mode    = geometry_mode,
@@ -102,6 +109,8 @@ def simulate():
             n_gap_photons    = n_gap_photons,
             material_a       = material_a,
             material_b       = material_b,
+            wave_model       = wave_model,
+            cache_path       = cache_path,
         )
         return jsonify({'status': 'success', 'results': results})
 

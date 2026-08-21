@@ -108,10 +108,9 @@ class RectPit3D:
         self.area_walls    = 2.0 * (self.W + self.D) * self.H
         self.height        = self.H
 
-        # Waveguide modal cutoff (Bug #13 / peer-review physics):
-        #   TE10 mode of a rectangular channel:  λ_c = 2·W.
-        #   Emission at λ > λ_c is evanescent and cannot reach the aperture.
-        self.lambda_c_um = 2.0 * self.width_um
+        # Waveguide modal cutoff (peer-review physics): the lowest rectangular
+        # mode is limited by the narrower transverse dimension.
+        self.lambda_c_um = 2.0 * min(self.width_um, self.depth_um)
         self.lambda_c    = self.lambda_c_um * 1e-6
 
     def channel_cutoff_wavelength_um(self) -> float:
