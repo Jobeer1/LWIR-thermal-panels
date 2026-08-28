@@ -50,6 +50,7 @@ This simulator runs **photon-scale Monte Carlo experiments** inside repeating ca
 
 ## 🏗️ System Architecture
 
+<<<<<<< HEAD
 ### Physics Orchestrator: Regime Selection
 
 Before any solver runs, the **Physics Orchestrator** (`regime_selector.py`) detects which physics model is appropriate by computing dimensionless ratios:
@@ -64,6 +65,9 @@ Before any solver runs, the **Physics Orchestrator** (`regime_selector.py`) dete
 The orchestrator also **computes a confidence score** (0–100%) from regime penalties, temperature drift, and material extrapolation status. This is surfaced in the UI as a color-coded badge with explicit warnings.
 
 ### High-Level Data Flow
+=======
+### Data Flow
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 
 ```mermaid
 flowchart TD
@@ -71,6 +75,7 @@ flowchart TD
     API["🔗 Flask API<br/>POST /api/simulate"]
     Sim["⚙️ Simulation Engine<br/>(Python backend)"]
     Cavity["📦 Build Cavity<br/>Geometry"]
+<<<<<<< HEAD
     Orchestrator["⚙️ Physics Orchestrator<br/>regime_selector.py"]
     Solver{"🎲 Which Physics?"}
     MC["Monte Carlo<br/>ray_tracer.py"]
@@ -79,6 +84,14 @@ flowchart TD
     Physics["✨ Apply Physics<br/>Corrections"]
     Regime{"🌡️ Gap Size<br/>Check"}
     NF["⚡ Near-Field<br/>near_field_radiative_heat.py"]
+=======
+    Solver{"🎲 Solver Mode?"}
+    MC["Monte Carlo<br/>Ray Tracing"]
+    Cached["Cached Wave<br/>Response Table"]
+    Physics["✨ Apply Physics<br/>Corrections"]
+    Regime{"🌡️ Gap Size<br/>Check"}
+    NF["⚡ Near-Field<br/>Polder-VH"]
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
     FF["📡 Far-Field<br/>Radiosity"]
     Output["📋 Results<br/>JSON"]
     Display["📊 Display Results<br/>Browser UI"]
@@ -86,6 +99,7 @@ flowchart TD
     User -->|JSON| API
     API --> Sim
     Sim --> Cavity
+<<<<<<< HEAD
     Cavity --> Orchestrator
     Orchestrator -->|λ/D, λ/P, d/λ, t/δ| Solver
     
@@ -96,6 +110,15 @@ flowchart TD
     MC --> Physics
     WaveSolve --> Physics
     EMT --> Physics
+=======
+    Cavity --> Solver
+    
+    Solver -->|wave_model='ray'| MC
+    Solver -->|wave_model='cached'| Cached
+    
+    MC --> Physics
+    Cached --> Physics
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
     
     Physics --> Regime
     Regime -->|gap < λ_peak/2π| NF
@@ -107,6 +130,7 @@ flowchart TD
     Output -->|JSON| Display
 ```
 
+<<<<<<< HEAD
 ### Monte Carlo Cavity Experiments
 
 Two photon-scale experiments run inside the repeating unit cell:
@@ -127,6 +151,10 @@ Two photon-scale experiments run inside the repeating unit cell:
 
 ### Component Hierarchy
 
+=======
+### Component Hierarchy
+
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 ```mermaid
 graph LR
     subgraph Frontend["🖥️ Frontend"]
@@ -141,7 +169,10 @@ graph LR
     
     subgraph Physics["⚙️ Physics Engine"]
         Sim["Orchestration<br/>simulator.py"]
+<<<<<<< HEAD
         Orchestrator["Physics Regime<br/>regime_selector.py"]
+=======
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
         Geo["Geometry Builder<br/>geometry.py"]
         Ray["Monte Carlo Tracer<br/>ray_tracer.py"]
         Samp["Sampling<br/>sampling.py"]
@@ -149,7 +180,10 @@ graph LR
         Mat["Optics & Materials<br/>material_optics.py"]
         Wave["Waveguide Modal<br/>waveguide_modes.py"]
         NF["Near-Field Model<br/>near_field_radiative_heat.py"]
+<<<<<<< HEAD
         BRDF["BRDF Surface<br/>brdf.py"]
+=======
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
         WP["Wave Physics Adapter<br/>wave_physics/"]
     end
     
@@ -157,6 +191,7 @@ graph LR
     API -->|Python| Physics
     
     Sim --> Geo
+<<<<<<< HEAD
     Sim --> Orchestrator
     Orchestrator --> Ray
     Orchestrator --> Wave
@@ -166,12 +201,21 @@ graph LR
     Ray --> Mat
     Ray --> BRDF
     Sim --> WP
+=======
+    Sim --> Ray
+    Sim --> WP
+    Ray --> Samp
+    Ray --> Spec
+    Ray --> Mat
+    Ray --> Wave
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
     Sim --> NF
     
     Physics -->|JSON| API
     API -->|HTTP| Frontend
 ```
 
+<<<<<<< HEAD
 ### Solver Mode Selection
 
 The simulator supports two modes, selectable via the `wave_model` parameter:
@@ -266,11 +310,62 @@ View factors and energy conservation ensure accurate net radiative flux calculat
 
 ## 📁 Project Structure
 
+=======
+### Single Simulation Run (Inside the Engine)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant API as Flask API
+    participant Sim as Simulator
+    participant Ray as Ray Tracer
+    participant NF as Near-Field
+    participant Rad as Radiosity
+    
+    U->>API: POST /api/simulate (JSON)
+    API->>Sim: run_simulation(params)
+    
+    Sim->>Sim: Build cavity geometry
+    
+    alt Solver Mode = 'ray'
+        Sim->>Ray: Run MC experiments
+        Ray->>Ray: Launch ~1000-20000 photons
+        Ray->>Ray: Track escape & absorption
+        Ray->>Ray: Apply thin-film, TMM, modal corrections
+        Ray->>Sim: Return α_eff, ε_B, p_esc
+    else Solver Mode = 'cached'
+        Sim->>Sim: Load wave response table
+        Sim->>Sim: Interpolate α_eff, ε_B from cache
+    end
+    
+    Sim->>Sim: Detect gap regime (near/far field)
+    
+    alt Gap < λ_peak/(2π)
+        Sim->>NF: Compute near-field flux
+        NF->>Sim: Return evanescent + propagating components
+    else Gap large
+        Sim->>Sim: Use classical far-field view factors
+    end
+    
+    Sim->>Rad: Solve 4-surface radiosity enclosure
+    Rad->>Sim: Return net flux, stagnation temp
+    
+    Sim->>API: Return results (JSON)
+    API->>U: Render in browser
+```
+
+## 📁 Project Structure
+
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 ```
 MonteCarlo ray tracing/
 │
 ├── 📄 README.md                                    # You are here
+<<<<<<< HEAD
 ├── 📄 simulation_architecture.md                   # Detailed architecture with visual diagrams
+=======
+├── 📄 simulation_architecture.md                   # Plain-English architecture guide
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 ├── 📄 DEVELOPMENT_NOTES.md                         # Physics phases & validation history
 ├── 📄 peer_review.txt                              # Physics references & citations
 │
@@ -286,6 +381,7 @@ MonteCarlo ray tracing/
 ├── ⚙️  GEOMETRY
 │   └── geometry.py                                 # Honeycomb, CNT forest, frustum cells
 │
+<<<<<<< HEAD
 ├── 🎡 PHYSICS ORCHESTRATOR
 │   └── regime_selector.py                          # Dimensionless ratio computation & regime selection
 │
@@ -294,6 +390,12 @@ MonteCarlo ray tracing/
 │   ├── sampling.py                                 # Lambertian direction & Planck wavelength sampling
 │   ├── spectral.py                                 # 5-band spectral model, Planck weighting
 │   └── brdf.py                                     # Bidirectional reflectance distribution functions
+=======
+├── 🎲 MONTE CARLO ENGINE
+│   ├── ray_tracer.py                               # 3-D photon tracing in cavities
+│   ├── sampling.py                                 # Lambertian direction & Planck wavelength sampling
+│   └── spectral.py                                 # 5-band spectral model, Planck weighting
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 │
 ├── ✨ PHYSICS CORRECTIONS
 │   ├── material_optics.py                          # Thin-film Beer–Lambert, TMM, complex n+ik
@@ -318,7 +420,10 @@ MonteCarlo ray tracing/
 │   ├── test_thin_film.py                           # Thin-film physics validation
 │   ├── test_wave_benchmarks.py                     # Wave response schema & cache tests
 │   ├── test_peer_review_physics.py                 # Peer-review physics checks
+<<<<<<< HEAD
 │   ├── test_physics_validator.py                   # Physics validator tests
+=======
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 │   ├── test_phase_integration.py                   # Phase 1 & 2 integration tests
 │   ├── test_phase3_integration.py                  # Phase 3 (near-field) integration
 │   ├── test_phase3_api.py                          # Flask /api/simulate near-field tests
@@ -430,7 +535,11 @@ After simulation completes:
 - **Confinement %**: How many thermal photons are trapped inside the cavity
 - **95% confidence intervals**: Statistical uncertainty on α_eff and ε_B
 
+<<<<<<< HEAD
 ## 🔌 REST API
+=======
+## � REST API
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 
 If you want to call the simulator programmatically:
 
@@ -569,7 +678,11 @@ python test_phase3_api.py
 python validate_integration.py
 ```
 
+<<<<<<< HEAD
 ## 📈 Accuracy & Limitations
+=======
+## � Accuracy & Limitations
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 
 ### Current Accuracy
 | Metric | Accuracy | Note |
@@ -596,7 +709,11 @@ python validate_integration.py
 - **Material data**: From literature (Palik handbook, etc.); not measured for your specific samples; temperature dependence of absorption depth not fully implemented
 - **Solver timeout**: Near-field integration falls back to far-field gracefully on numerical issues
 
+<<<<<<< HEAD
 ## 📚 References
+=======
+## �📚 References
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 
 ### Thin-film / optical
 - Born & Wolf, *Principles of Optics* (1999); Heavens (1955); Palik,
@@ -636,3 +753,8 @@ MIT License — see [LICENSE](LICENSE).
 and near-field corrections.
 **Status**: Active development — see `DEVELOPMENT_NOTES.md` for the consolidated
 roadmap and change history.
+<<<<<<< HEAD
+=======
+
+ makes it much easier for reviewers to leave formal feedback without needing to dig through the code first.
+>>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
