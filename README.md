@@ -64,69 +64,71 @@ Before any solver runs, the **Physics Orchestrator** (`regime_selector.py`) dete
 The orchestrator also **computes a confidence score** (0–100%) from regime penalties, temperature drift, and material extrapolation status. This is surfaced in the UI as a color-coded badge with explicit warnings.
 
 ### High-Level Data Flow
-=======
-### Data Flow
 
 ```mermaid
 flowchart TD
-    User["👤 User Input<br/>(Browser UI)"]
-    API["🔗 Flask API<br/>POST /api/simulate"]
-    Sim["⚙️ Simulation Engine<br/>(Python backend)"]
-    Cavity["📦 Build Cavity<br/>Geometry"]
-<<<<<<< HEAD
-    Orchestrator["⚙️ Physics Orchestrator<br/>regime_selector.py"]
-    Solver{"🎲 Which Physics?"}
-    MC["Monte Carlo<br/>ray_tracer.py"]
-    WaveSolve["Waveguide Modal<br/>waveguide_modes.py"]
-    EMT["Maxwell-Garnett TMM<br/>material_optics.py"]
-    Physics["✨ Apply Physics<br/>Corrections"]
-    Regime{"🌡️ Gap Size<br/>Check"}
-    NF["⚡ Near-Field<br/>near_field_radiative_heat.py"]
-=======
-    Solver{"🎲 Solver Mode?"}
-    MC["Monte Carlo<br/>Ray Tracing"]
-    Cached["Cached Wave<br/>Response Table"]
-    Physics["✨ Apply Physics<br/>Corrections"]
-    Regime{"🌡️ Gap Size<br/>Check"}
-    NF["⚡ Near-Field<br/>Polder-VH"]
->>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
-    FF["📡 Far-Field<br/>Radiosity"]
-    Output["📋 Results<br/>JSON"]
-    Display["📊 Display Results<br/>Browser UI"]
-    
-    User -->|JSON| API
-    API --> Sim
-    Sim --> Cavity
-<<<<<<< HEAD
-    Cavity --> Orchestrator
-    Orchestrator -->|λ/D, λ/P, d/λ, t/δ| Solver
-    
-    Solver -->|RAY| MC
-    Solver -->|FULL_WAVE| WaveSolve
-    Solver -->|EMT| EMT
-    
-    MC --> Physics
-    WaveSolve --> Physics
-    EMT --> Physics
-=======
-    Cavity --> Solver
-    
-    Solver -->|wave_model='ray'| MC
-    Solver -->|wave_model='cached'| Cached
-    
-    MC --> Physics
-    Cached --> Physics
->>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
-    
-    Physics --> Regime
-    Regime -->|gap < λ_peak/2π| NF
-    Regime -->|gap large| FF
-    
-    NF --> Output
-    FF --> Output
-    
-    Output -->|JSON| Display
-```
+    %% Class Definitions
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc,font-family:sans-serif;
+    classDef ioNode fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#e0f2fe;
+    classDef orchestrator fill:#0f172a,stroke:#2dd4bf,stroke-width:2.5px,color:#2dd4bf,font-weight:bold;
+    classDef decision fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#38bdf8,font-weight:bold;
+    classDef rayMode fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#ecfdf5;
+    classDef fullWaveMode fill:#3730a3,stroke:#818cf8,stroke-width:1.5px,color:#e0e7ff;
+    classDef emtMode fill:#701a75,stroke:#f0abfc,stroke-width:1.5px,color:#fdf4ff;
+    classDef nearField fill:#7f1d1d,stroke:#f87171,stroke-width:1.5px,color:#fef2f2;
+    classDef outputNode fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff,font-weight:bold;
+
+    subgraph FLOW["🚀 High-Level Simulation Flow"]
+        style FLOW fill:#0f172a,stroke:#0d9488,stroke-width:2px,color:#2dd4bf,font-weight:bold;
+
+        User["👤 User Input<br/>(Browser UI)"] -->|JSON| API["🔗 Flask API<br/>POST /api/simulate"]
+        API --> Sim["⚙️ Simulation Engine<br/>(Python backend)"]
+        Sim --> Cavity["📦 Build Cavity<br/>Geometry"]
+        Cavity --> Orchestrator["⚙️ Physics Orchestrator<br/>regime_selector.py"]
+
+        Orchestrator -->|λ/D, λ/P, d/λ, t/δ| Solver{"🎲 Which Physics?"}
+
+        Solver -->|RAY| MC["Monte Carlo<br/>ray_tracer.py"]
+        Solver -->|FULL_WAVE| WaveSolve["Waveguide Modal<br/>waveguide_modes.py"]
+        Solver -->|EMT| EMT["Maxwell-Garnett TMM<br/>material_optics.py"]
+
+        MC --> Physics["✨ Apply Physics<br/>Corrections"]
+        WaveSolve --> Physics
+        EMT --> Physics
+
+        Physics --> Regime{"🌡️ Gap Size<br/>Check"}
+        Regime -->|gap < λ_peak/2π| NF["⚡ Near-Field<br/>near_field_radiative_heat.py"]
+        Regime -->|gap large| FF["📡 Far-Field<br/>Radiosity"]
+
+        NF --> Output["📋 Results<br/>JSON"]
+        FF --> Output
+
+        Output -->|JSON| Display["📊 Display Results<br/>Browser UI"]
+    end
+
+    %% Apply Classes
+    class User,API,Display ioNode;
+    class Orchestrator orchestrator;
+    class Solver,Regime decision;
+    class MC rayMode;
+    class WaveSolve fullWaveMode;
+    class EMT emtMode;
+    class NF nearField;
+    class Output outputNode;
+
+    %% Link Styling (Mapped 0..17 to prevent render errors)
+    linkStyle 0,1,2,3 stroke:#38bdf8,stroke-width:2px,fill:none;
+    linkStyle 4 stroke:#2dd4bf,stroke-width:2px,fill:none;
+    linkStyle 5 stroke:#34d399,stroke-width:2px,fill:none;
+    linkStyle 6 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 7 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 8 stroke:#34d399,stroke-width:2px,fill:none;
+    linkStyle 9 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 10 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 11 stroke:#38bdf8,stroke-width:2px,fill:none;
+    linkStyle 12 stroke:#f87171,stroke-width:2px,fill:none;
+    linkStyle 13 stroke:#38bdf8,stroke-width:2px,fill:none;
+    linkStyle 14,15,16 stroke:#10b981,stroke-width:2px,fill:none;
 
 ### Monte Carlo Cavity Experiments
 
