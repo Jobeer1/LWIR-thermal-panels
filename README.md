@@ -634,8 +634,8 @@ MIT License — see [LICENSE](LICENSE).
 and near-field corrections.
 **Status**: Active development — see `DEVELOPMENT_NOTES.md` for the consolidated
 roadmap and change history.hrough the code first.
-<<<<<<< HEAD
-=======
+
+
 
  makes it much easier for reviewers to leave formal feedback without needing to dig through the code first.
->>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
+
