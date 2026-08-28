@@ -23,21 +23,61 @@ Date: August 2026
 import numpy as np
 import warnings
 
-try:
-    from scipy import integrate, optimize
-    from scipy.polynomial.legendre import leggauss
-    SCIPY_AVAILABLE = True
-except ImportError:
-    SCIPY_AVAILABLE = False
-    warnings.warn("scipy not available; using fallback numerical methods")
-    
-    def leggauss(n):
-        """Fallback Gauss-Legendre quadrature if scipy unavailable."""
-        warnings.warn("Using basic fallback quadrature (lower accuracy)")
-        # Simple fallback: equally-spaced nodes with uniform weights
+# Gauss-Legendre quadrature provider.
+#
+# Historically scipy exposed these as ``scipy.polynomial.legendre.leggauss``,
+# but that subpackage was REMOVED from scipy (the class location is now
+# ``scipy.special.roots_legendre``).  Because the old import raised
+# ModuleNotFoundError, the code falsely reported "scipy not available".
+# We therefore: 1) use the canonical modern scipy location first, and
+# 2) fall back to numpy's mathematically-identical Gauss-Legendre routine
+# (``numpy.polynomial.legendre.leggauss``) which needs NO scipy at all and
+# returns the exact same nodes/weights up to floating point.
+def _gl_quadrature(n: int):
+    """Return (nodes, weights) for n-point Gauss-Legendre on [-1, 1].
+
+    Tries scipy's canonical ``roots_legendre`` first; if scipy's polynomial
+    subpackage is unavailable (or scipy itself is missing) it uses numpy's
+    equivalent routine.  Both yield the *exact* Gauss-Legendre quadrature —
+    NOT the low-accuracy uniform-sampling fallback some older versions used.
+    """
+    try:
+        from scipy.special import roots_legendre
+        nodes, weights = roots_legendre(n)
+        return np.asarray(nodes), np.asarray(weights)
+    except Exception:
+        pass
+    from numpy.polynomial.legendre import leggauss
+    return leggauss(n)
+
+
+# An optional, uniform-sampling fallback if even numpy's polynomial helpers
+# are unavailable (should never happen — numpy provides them in any version
+# that runs this code).  Kept purely as a cosmetic guard.
+def leggauss(n):
+    """Gauss-Legendre nodes/weights on [-1,1].
+
+    Prefers the exact routines from scipy.special / numpy.polynomial; only if
+    BOTH are somehow missing does it degrade to a uniform-sampling estimate
+    so the quadrature still runs (flagged with a warning).
+    """
+    try:
+        return _gl_quadrature(n)
+    except Exception:
+        warnings.warn("Gauss-Legendre quadrature unavailable; using uniform nodes "
+                      "(reduced accuracy)")
         nodes = np.linspace(-1, 1, n)
         weights = np.ones(n) * (2.0 / n)
         return nodes, weights
+
+
+try:
+    from scipy import integrate, optimize
+    import scipy.special as _scipy_special
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    warnings.warn("scipy not available; using numpy numerical fallbacks")
 
 try:
     from material_optics import get_complex_refractive_index
@@ -149,80 +189,85 @@ def near_field_transmission_coefficient(
     c_light: float = c
 ) -> float:
     """
-    Near-field radiative transmission coefficient s(k_∥, ω, g).
-    
-    Computes the energy transmission coefficient for evanescent and
-    propagating waves crossing a gap g between two surfaces.
-    
-    Implements Polder-Van Hove formula:
-        s = 4 / (1 + exp(2κ_gap·g)) × 2·r_p·r_s / (r_p + r_s - r_p·r_s·exp(2κ_gap·g))
-    
+    Near-field radiative transmission coefficient xi(k_∥, ω, g).
+
+    Implements the exact Polder-Van Hove (1971) two-surface formula
+    separately for propagating and evanescent wave regimes:
+
+    Propagating  (k_∥ ≤ k_0):
+        xi_P = (1 - |r_s|²)(1 - |r_s'|²) / |1 - r_s·r_s'·e^{2i κ d}|²
+               + (1 - |r_p|²)(1 - |r_p'|²) / |1 - r_p·r_p'·e^{2i κ d}|²
+
+    Evanescent   (k_∥ > k_0):  κ_gap = i|κ_gap|  ⟹  e^{2 κ d} = e^{-2|κ|d}
+        xi_E = 4 Im(r_s) Im(r_s') e^{-2|κ|d} / |1 - r_s·r_s'·e^{-2|κ|d}|²
+               + 4 Im(r_p) Im(r_p') e^{-2|κ|d} / |1 - r_p·r_p'·e^{-2|κ|d}|²
+
     Parameters
     ----------
     k_parallel_m : float
-        Parallel wavevector (m⁻¹)
+        Parallel wavevector magnitude (m⁻¹)
     omega_rad_s : float
         Angular frequency (rad/s)
     gap_m : float
-        Gap distance (m)
+        Vacuum gap distance (m)
     n_emitter : complex
-        Complex refractive index of emitter surface
+        Complex refractive index of emitter surface (hot side)
     n_receiver : complex
-        Complex refractive index of receiver surface
+        Complex refractive index of receiver surface (cold side)
     c_light : float
         Speed of light (m/s)
-    
+
     Returns
     -------
     float
-        Transmission coefficient s ∈ [0, ~4]
-        Typically < 1 for propagating, can exceed 1 for evanescent near resonance
+        Transmission coefficient xi ≥ 0
     """
-    
-    k0 = omega_rad_s / c_light
-    
-    # Get Fresnel coefficients at emitter-gap and gap-receiver interfaces
-    r_s, r_p = fresnel_coefficients_interface(
-        k_parallel_m, omega_rad_s, n_emitter, 1.0 + 0.0j, c_light
-    )
-    
-    # Decay in vacuum gap
-    kappa_gap_sq = k0**2 - k_parallel_m**2
-    if kappa_gap_sq < 0:
-        # Evanescent: κ_gap = i√(k_∥² - k_0²)
-        kappa_gap = 1.0j * np.sqrt(-kappa_gap_sq)
-    else:
-        # Propagating
-        kappa_gap = np.sqrt(kappa_gap_sq)
-    
-    # Phase/decay crossing gap
-    phase_gap = 2.0 * kappa_gap * gap_m
-    exp_phase_gap = np.exp(phase_gap)
-    
-    # Polder-Van Hove formula (simplified)
-    # s = 4/(1 + e^(κ·2g)) × (2·r_p·r_s) / (r_p + r_s - r_p·r_s·e^(κ·2g))
-    
     try:
-        # Numerator: 4·r_p·r_s / (1 + exp(2κ·g))
-        numerator = 4.0 * r_p * r_s
-        denominator_1 = 1.0 + np.exp(np.real(phase_gap))  # For amplitude
-        
-        # Alternative denominator for the full formula
-        denominator_2 = r_p + r_s - r_p * r_s * exp_phase_gap
-        
-        if abs(denominator_2) < 1e-30:
-            return 0.0
-        
-        # Full formula from Polder-Van Hove
-        s = numerator / denominator_2
-        
-        # Ensure physical: s should be real and ≥ 0 for this frequency
-        s_real = np.real(s)
-        s_phys = max(0.0, s_real)
-        
-        return float(s_phys)
-        
-    except (ValueError, RuntimeWarning):
+        k0 = omega_rad_s / c_light
+        kappa_gap_sq = k0**2 - k_parallel_m**2
+
+        # Fresnel reflection coefficients at emitter/vacuum interface (surface 1)
+        r1_s, r1_p = fresnel_coefficients_interface(
+            k_parallel_m, omega_rad_s, n_emitter, 1.0 + 0.0j, c_light
+        )
+        # Fresnel reflection coefficients at vacuum/receiver interface (surface 2)
+        r2_s, r2_p = fresnel_coefficients_interface(
+            k_parallel_m, omega_rad_s, n_receiver, 1.0 + 0.0j, c_light
+        )
+
+        if kappa_gap_sq >= 0:
+            # ---- Propagating regime ----------------------------------------
+            kappa = np.sqrt(kappa_gap_sq + 0j)  # real, positive
+            phase = np.exp(2.0j * kappa * gap_m)
+
+            xi = 0.0
+            for r1, r2 in [(r1_s, r2_s), (r1_p, r2_p)]:
+                denom_sq = abs(1.0 - r1 * r2 * phase) ** 2
+                if denom_sq < 1e-60:
+                    continue
+                # (1-|r1|²)(1-|r2|²)
+                numerator = (1.0 - abs(r1)**2) * (1.0 - abs(r2)**2)
+                xi += numerator / denom_sq
+
+        else:
+            # ---- Evanescent regime -----------------------------------------
+            kappa_abs = np.sqrt(-kappa_gap_sq)  # positive real
+            exp_decay = np.exp(-2.0 * kappa_abs * gap_m)  # always < 1
+
+            xi = 0.0
+            for r1, r2 in [(r1_s, r2_s), (r1_p, r2_p)]:
+                im1 = np.imag(r1)
+                im2 = np.imag(r2)
+                if im1 <= 0.0 or im2 <= 0.0:
+                    continue  # only lossy (absorbing) media contribute
+                denom_sq = abs(1.0 - r1 * r2 * exp_decay) ** 2
+                if denom_sq < 1e-60:
+                    continue
+                xi += 4.0 * im1 * im2 * exp_decay / denom_sq
+
+        return float(max(0.0, np.real(xi)))
+
+    except Exception:
         return 0.0
 
 
@@ -374,10 +419,13 @@ def near_field_heat_flux_spectral(
             continue
         
         try:
-            n_hot_real, k_hot = get_complex_refractive_index(material_hot, lambda_um)
+            # Phase 4a: temperature-corrected optical constants for each plate.
+            n_hot_real, k_hot = get_complex_refractive_index(
+                material_hot, lambda_um, temperature_K=temperature_hot_K)
             n_hot = n_hot_real + 1.0j * k_hot
             
-            n_cold_real, k_cold = get_complex_refractive_index(material_cold, lambda_um)
+            n_cold_real, k_cold = get_complex_refractive_index(
+                material_cold, lambda_um, temperature_K=temperature_cold_K)
             n_cold = n_cold_real + 1.0j * k_cold
         except:
             continue

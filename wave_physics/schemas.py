@@ -16,7 +16,7 @@ Schema rules
   broadcast grid of (theta, phi) for each wavelength — a shape
   ``(n_wavelength, n_theta, n_phi)``.  Scalar axes are broadcast (size 1).
 * energy_balance_error[i,j,k] = |1 - R - T - A| at that grid point.
-* solver_kind is one of 'ray', 'cached', 'cmt', 'fdtd'.
+* solver_kind is one of 'ray', 'cached', 'cmt', 'fdtd', 'rcwa'.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from . import conventions
 SCHEMA_VERSION = '1.0'
 
 #: Accepted solver kinds (provenance labels).
-VALID_SOLVER_KINDS = ('ray', 'cached', 'cmt', 'fdtd')
+VALID_SOLVER_KINDS = ('ray', 'cached', 'cmt', 'fdtd', 'rcwa', 'nf_greens')
 
 #: Names of all array fields (for serialization / validation).
 ARRAY_FIELDS = (
@@ -107,6 +107,8 @@ class WaveResponse:
         }
         for name in ARRAY_FIELDS:
             d[name] = np.asarray(getattr(self, name)).tolist()
+        d['near_field'] = (self.near_field.to_dict()
+                           if self.near_field is not None else None)
         return d
 
     @classmethod
@@ -120,6 +122,10 @@ class WaveResponse:
         for name in ARRAY_FIELDS:
             vals = d.get(name, [])
             kwargs[name] = np.asarray(vals, dtype=float) if vals is not None else np.array([])
+        nf = d.get('near_field')
+        if nf:
+            # Reconstruct the NearFieldResponse carried in the near_field slot.
+            kwargs['near_field'] = NearFieldResponse.from_dict(nf)  # type: ignore[arg-type]
         return cls(**kwargs)
 
     # Spectral / angular axes (µm, radians).  May be 1-D grids.
@@ -134,6 +140,13 @@ class WaveResponse:
 
     # Residual |1 - R - T - A| per grid point.
     energy_balance_error: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+
+    #: Optional structured near-field Green-tensor + LDOS response carried
+    #: alongside the hemispherical R/T/A table.  This makes WaveResponse a
+    #: union container: ray/cached/fdtt/rcwa/cmt responses fill the R/T/A axes,
+    #: while a NearFieldResponse (solver_kind='nf_greens') is attached when the
+    #: cavity gap is sub-wavelength (g < lambda_peak / 2*pi).
+    near_field: Optional["NearFieldResponse"] = None
 
     # ------------------------------------------------------------------ #
 
@@ -218,4 +231,110 @@ def load_response(path: str, fmt: str = 'auto') -> WaveResponse:
         return WaveResponse.load_h5(path)
     with open(path, 'r', encoding='utf-8') as fh:
         return WaveResponse.from_dict(json.load(fh))
+
+
+# ---------------------------------------------------------------------------
+# Near-field response schema (Track B2)
+# ---------------------------------------------------------------------------
+
+#: Solver kind for cached structured near-field Green's tensor results.
+NEAR_FIELD_SOLVER_KIND = 'nf_greens'
+
+
+@dataclass
+class NearFieldResponse:
+    """Versioned container for structured near-field heat-flux tables.
+
+    The flux table has shape ``(n_wavelength, n_gap)`` and carries
+    provenance metadata so the API/UI can display the solver mode,
+    validity, and cache source.  Spectral axis is wavelength in
+    micrometres; gap axis is gap distance in micrometres.
+
+    Schema rules (mirrors WaveResponse):
+    * All axes are wavelengths in micrometres and gaps in micrometres.
+    * solver_kind must be 'nf_greens'.
+    * metadata must include 'generated_by' and 'scope_note'.
+    """
+
+    version: str = SCHEMA_VERSION
+    solver_kind: str = NEAR_FIELD_SOLVER_KIND
+    metadata: Dict[str, object] = field(default_factory=dict)
+
+    # 2-D spectral / spatial grid
+    wavelength_um: object = field(default_factory=lambda: np.array([]))
+    gap_um: object = field(default_factory=lambda: np.array([]))
+    # flux table: (n_wavelength, n_gap)
+    flux_W_m2: object = field(default_factory=lambda: np.array([]))
+
+    # ------------------------------------------------------------------ #
+
+    def __post_init__(self) -> None:
+        """Coerce list inputs to arrays and validate solver_kind."""
+        for name in ('wavelength_um', 'gap_um', 'flux_W_m2'):
+            v = getattr(self, name)
+            if not isinstance(v, np.ndarray):
+                setattr(self, name, np.asarray(v, dtype=float))
+
+        if self.solver_kind not in ('nf_greens',) + VALID_SOLVER_KINDS:
+            raise ValueError(
+                f"Invalid solver_kind {self.solver_kind!r}; "
+                f"expected 'nf_greens' or one of {VALID_SOLVER_KINDS}.")
+
+    # ------------------------------------------------------------------ #
+
+    def shape(self) -> tuple:
+        """Return the (n_wavelength, n_gap) shape of the flux table."""
+        return tuple(self.flux_W_m2.shape)
+
+    def max_abs_flux(self) -> float:
+        """Maximum absolute flux over the whole table (W/m^2)."""
+        if self.flux_W_m2.size == 0:
+            return 0.0
+        return float(np.nanmax(np.abs(self.flux_W_m2)))
+
+    # ------------------------------------------------------------------ #
+    # Serialization
+    # ------------------------------------------------------------------ #
+
+    def to_dict(self) -> dict:
+        """Serialize to a plain dict (JSON-compatible)."""
+        return {
+            'version': self.version,
+            'solver_kind': self.solver_kind,
+            'metadata': self.metadata,
+            'wavelength_um': np.asarray(self.wavelength_um).tolist(),
+            'gap_um': np.asarray(self.gap_um).tolist(),
+            'flux_W_m2': np.asarray(self.flux_W_m2).tolist(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NearFieldResponse":
+        """Construct from a dict (JSON round-trip)."""
+        return cls(
+            version=data.get('version', SCHEMA_VERSION),
+            solver_kind=data.get('solver_kind', NEAR_FIELD_SOLVER_KIND),
+            metadata=data.get('metadata', {}),
+            wavelength_um=np.asarray(data.get('wavelength_um', []), dtype=float),
+            gap_um=np.asarray(data.get('gap_um', []), dtype=float),
+            flux_W_m2=np.asarray(data.get('flux_W_m2', []), dtype=float),
+        )
+
+    def save_json(self, path: str) -> None:
+        """Write the near-field response as UTF-8 JSON."""
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(self.to_dict(), fh, indent=2)
+
+    def brief(self) -> str:
+        """Short human-readable provenance summary."""
+        grid = self.shape()
+        return (f"NearFieldResponse v{self.version} solver={self.solver_kind} "
+                f"grid={grid} max_flux={self.max_abs_flux():.2e} W/m^2 "
+                f"lambda[{np.min(self.wavelength_um):g},{np.max(self.wavelength_um):g}]um "
+                                f"gap[{np.min(self.gap_um):g},{np.max(self.gap_um):g}]um")
+
+
+def load_near_field_response(path: str) -> NearFieldResponse:
+    """Load a NearFieldResponse from a JSON file path."""
+    with open(path, 'r', encoding='utf-8') as fh:
+        return NearFieldResponse.from_dict(json.load(fh))
 

@@ -19,19 +19,19 @@ def simulate():
         geometry_mode = str(data.get('geometry_mode', 'honeycomb'))
 
         # ---- Shared Plate B cavity parameters ----------------------------
-        height     = float(data.get('height', 450.0))        # µm
+        height     = float(data.get('height', data.get('cavity_height_um', 450.0)))        # µm
         eps_flat_wall = float(data.get('eps_flat_wall', 0.1))
 
         if geometry_mode == 'honeycomb':
-            alpha_cnt  = float(data.get('emissivity_cnt_hc', 0.95))
-            alpha_ag   = float(data.get('emissivity_base_hc', 0.95))
+            alpha_cnt  = float(data.get('emissivity_cnt_hc', data.get('eps_walls', 0.95)))
+            alpha_ag   = float(data.get('emissivity_base_hc', data.get('eps_base', 0.95)))
         else:
             alpha_cnt  = float(data.get('emissivity_cnt_forest', 0.98))
             alpha_ag   = float(data.get('emissivity_base_forest', 0.40))
 
         # ---- Honeycomb-specific ------------------------------------------
-        cavity_diameter = float(data.get('cavity_diameter', 20.0))  # µm
-        wall_thickness  = float(data.get('wall_thickness', 1.0))    # µm
+        cavity_diameter = float(data.get('cavity_diameter', data.get('cavity_diameter_um', 20.0)))  # µm
+        wall_thickness  = float(data.get('wall_thickness', data.get('wall_thickness_um', 1.0)))    # µm
         if not math.isfinite(cavity_diameter) or cavity_diameter < 0.001:
             raise ValueError('Honeycomb cavity diameter must be at least 0.001 µm (1 nm).')
         if not math.isfinite(wall_thickness) or wall_thickness < 0.051:
@@ -50,22 +50,39 @@ def simulate():
         cnt_dia_top  = float(data.get('cnt_diameter_top',  5.0))   # nm
 
         # ---- Legacy rect pit params (kept for compatibility) --------------
-        width = float(data.get('pitch', 10.0))
-        depth = float(data.get('trench_depth', 10.0))
+        width = float(data.get('pitch', data.get('width_um', 10.0)))
+        depth = float(data.get('trench_depth', data.get('depth_um', 10.0)))
 
         # ---- Plate A parameters ------------------------------------------
         temp_a          = float(data.get('temp_a', 600.0))
         emissivity_a    = float(data.get('emissivity_a', 1.0))
         emissivity_a_back = float(data.get('emissivity_a_back', 0.1))
-        width_a         = float(data.get('width_a', 1000.0))  # µm
-        depth_a         = float(data.get('depth_a', 1000.0))  # µm
+        width_a         = float(data.get('width_a', data.get('width_um', 1000.0)))  # µm
+        depth_a         = float(data.get('depth_a', data.get('depth_um', 1000.0)))  # µm
         material_a      = str(data.get('material_a', ''))
 
         # ---- Gap / surroundings ------------------------------------------
-        gap      = float(data.get('gap', 100.0))
+        gap      = float(data.get('gap', data.get('gap_distance_um', 100.0)))
         temp_b   = float(data.get('temp_b', 300.0))
         temp_surr= float(data.get('temp_surr', 300.0))
         material_b = str(data.get('material_b', ''))
+
+        # ---- Temperature validation ------------------------------------------
+        # Non-finite / negative temperatures are rejected.  High-temperature
+        # extrapolation beyond the 300 K calibration baseline is permitted; the
+        # physics orchestrator (regime_selector.py) tracks it with confidence
+        # penalties and an audit-trail warning so the user always sees the
+        # reduced model trustworthiness.
+        for name, val in (('temp_a', temp_a), ('temp_b', temp_b),
+                          ('temp_surr', temp_surr)):
+            if not math.isfinite(val) or val < 0.0:
+                raise ValueError(f'{name} must be a finite, non-negative temperature (K).')
+            if val < 1.0:
+                raise ValueError(
+                    f'{name} = {val:g} K is below 1 K.  For cryogenic '
+                    f'temperatures below 1 K, quantum surface effects dominate '
+                    f'and the classical Planck radiator model is not appropriate.'
+                )
 
         # ---- MC settings --------------------------------------------------
         n_photons = int(data.get('n_photons', 1000))
@@ -77,7 +94,7 @@ def simulate():
 
         # ---- Wave-model solver selector (Phase 0/6) ------------------------
         # 'ray' (default fallback, Monte Carlo) or 'cached' (pre-computed full-wave).
-        wave_model = str(data.get('wave_model', 'ray')).strip().lower()
+        wave_model = str(data.get('wave_model', data.get('solver_mode', 'ray'))).strip().lower()
         if wave_model not in ('ray', 'cached'):
             wave_model = 'ray'
         cache_path = str(data.get('cache_path', '')).strip()
@@ -87,6 +104,21 @@ def simulate():
         near_field_threshold = float(data.get('near_field_threshold', 5.0))
         near_field_n_omega = int(data.get('near_field_n_omega', 80))
         near_field_n_kparallel = int(data.get('near_field_n_kparallel', 50))
+
+        # ---- Phase 4b (surface-roughness BRDF) parameters --------------------
+        # σ/τ in µm. Absent / non-positive σ keeps the legacy Lambertian bounce.
+        def _optional_positive(key):
+            raw = data.get(key, None)
+            if raw in (None, '', 'none', 'null'):
+                return None
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                return None
+            return val if val > 0 else None
+
+        surface_roughness_um = _optional_positive('surface_roughness_um')
+        roughness_correlation_um = _optional_positive('roughness_correlation_um')
 
         results = run_simulation(
             geometry_mode    = geometry_mode,
@@ -122,6 +154,9 @@ def simulate():
             near_field_threshold = near_field_threshold,
             near_field_n_omega = near_field_n_omega,
             near_field_n_kparallel = near_field_n_kparallel,
+            # Phase 4b parameters (surface-roughness BRDF)
+            surface_roughness_um = surface_roughness_um,
+            roughness_correlation_um = roughness_correlation_um,
         )
         return jsonify({'status': 'success', 'results': results})
 

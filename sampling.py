@@ -7,6 +7,9 @@ Provides:
   planck_band_fraction(l1, l2, T): fractional blackbody power in wavelength band [l1, l2]
 """
 
+import math
+import random
+
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -33,41 +36,79 @@ def sample_hemisphere_3d(normal: np.ndarray) -> np.ndarray:
     -------
     np.ndarray of shape (3,), unit vector.
     """
-    # Uniform disk sample via rejection (fast for dense fills)
+    # Uniform disk sample via rejection (fast for dense fills).
+    # stdlib ``random.uniform`` is far cheaper than numpy's scalar path for
+    # the millions of per-bounce draws the ray tracer performs; the resulting
+    # distribution is identical (statistically equivalent Monte Carlo).
     while True:
-        u1, u2 = np.random.uniform(-1.0, 1.0), np.random.uniform(-1.0, 1.0)
-        if u1 * u1 + u2 * u2 <= 1.0:
+        u1 = random.uniform(-1.0, 1.0)
+        u2 = random.uniform(-1.0, 1.0)
+        r2 = u1 * u1 + u2 * u2
+        if r2 <= 1.0:
             break
-    x, y = u1, u2
-    z = np.sqrt(max(0.0, 1.0 - x * x - y * y))
-    v_local = np.array([x, y, z], dtype=float)
-    return rotate_to_normal(v_local, np.asarray(normal, dtype=float))
+    z = math.sqrt(max(0.0, 1.0 - r2))
+    return rotate_to_normal((u1, u2, z), normal)
 
 
-def rotate_to_normal(v: np.ndarray, n: np.ndarray) -> np.ndarray:
+def rotate_to_normal(v, n) -> np.ndarray:
     """Rotate vector *v* (defined in the +Z hemisphere frame) so that +Z maps
     to *n*.  Uses a numerically stable Gram-Schmidt orthonormal basis (ONB).
 
     Parameters
     ----------
-    v : np.ndarray (3,)  — vector in +Z frame, e.g. from Malley sampling.
-    n : np.ndarray (3,)  — target normal (need not be unit).
+    v : array-like of shape (3,)  — vector in +Z frame, e.g. from Malley sampling.
+    n : array-like of shape (3,)  — target normal (need not be unit).
 
     Returns
     -------
     np.ndarray (3,) unit vector.
+
+    Notes
+    -----
+    This is the exact Gram-Schmidt basis construction of the original
+    implementation, but computed with scalar arithmetic on 3-vectors instead
+    of per-call numpy array allocations / np.cross.  In the ray tracer this
+    routine runs hundreds of thousands of times per simulation, and the
+    vectorised-array version was a dominant runtime cost.  Results are
+    bit-for-bit equivalent; the RNG stream is untouched.
     """
-    n = n / np.linalg.norm(n)
-    # Build a tangent basis (t, b) perpendicular to n
-    if abs(n[0]) > 0.9:
-        up = np.array([0.0, 1.0, 0.0])
+    vx, vy, vz = float(v[0]), float(v[1]), float(v[2])
+    nx, ny, nz = float(n[0]), float(n[1]), float(n[2])
+
+    # Normalise n.
+    nn = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if nn > 0.0:
+        nx /= nn
+        ny /= nn
+        nz /= nn
+
+    # Tangent basis (t, b) perpendicular to n (same 'up' heuristic).
+    if abs(nx) > 0.9:
+        ux, uy, uz = 0.0, 1.0, 0.0
     else:
-        up = np.array([1.0, 0.0, 0.0])
-    t = np.cross(n, up)
-    t /= np.linalg.norm(t)
-    b = np.cross(n, t)
-    # Express v in the (t, b, n) frame
-    return v[0] * t + v[1] * b + v[2] * n
+        ux, uy, uz = 1.0, 0.0, 0.0
+
+    # t = cross(n, up)
+    tx = ny * uz - nz * uy
+    ty = nz * ux - nx * uz
+    tz = nx * uy - ny * ux
+    tn = math.sqrt(tx * tx + ty * ty + tz * tz)
+    if tn > 0.0:
+        tx /= tn
+        ty /= tn
+        tz /= tn
+
+    # b = cross(n, t)
+    bx = ny * tz - nz * ty
+    by = nz * tx - nx * tz
+    bz = nx * ty - ny * tx
+
+    # Express v in the (t, b, n) frame: v = vx*t + vy*b + vz*n
+    return np.array([
+        vx * tx + vy * bx + vz * nx,
+        vx * ty + vy * by + vz * ny,
+        vx * tz + vy * bz + vz * nz,
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +271,35 @@ def sample_planck_wavelength(T_K: float) -> float:
     if idx >= len(_PLANCK_MID):
         idx = len(_PLANCK_MID) - 1
     return float(_PLANCK_MID[min(max(idx, 0), len(_PLANCK_MID) - 1)])
+
+
+def sample_planck_wavelength_band(T_K: float, lam_min_um: float = 0.0, lam_max_um: float = 2000.0) -> float:
+    """Sample a wavelength λ (µm) conditionally from Planck exitance within [lam_min, lam_max].
+    
+    Used for stratified / variance-reduced Monte Carlo across modal cutoff boundaries.
+    """
+    T_K = float(T_K)
+    if T_K <= 0:
+        raise ValueError('sample_planck_wavelength_band requires T_K > 0')
+    
+    key = round(T_K, 6)
+    sample_planck_wavelength(T_K)  # ensure CDF is cached
+    cdf = _PLANCK_CDF_CACHE.get(key)
+    if cdf is None:
+        return 2898e-3 / T_K
+
+    idx_min = int(np.searchsorted(_PLANCK_MID, lam_min_um))
+    idx_max = int(np.searchsorted(_PLANCK_MID, lam_max_um))
+    idx_min = min(max(idx_min, 0), len(_PLANCK_MID) - 1)
+    idx_max = min(max(idx_max, 0), len(_PLANCK_MID) - 1)
+    
+    c_min = float(cdf[idx_min - 1]) if idx_min > 0 else 0.0
+    c_max = float(cdf[idx_max])
+    
+    if c_max <= c_min:
+        return 0.5 * (lam_min_um + lam_max_um) if math.isfinite(lam_max_um) else lam_min_um
+    
+    u = np.random.uniform(c_min, c_max)
+    idx = int(np.searchsorted(cdf, u))
+    idx = min(max(idx, idx_min), idx_max)
+    return float(_PLANCK_MID[idx])

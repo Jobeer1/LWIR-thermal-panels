@@ -539,6 +539,7 @@ class HoneycombCavityCell:
     height_um:        float   # cavity depth (µm)
     wall_emissivity:  float = 0.95   # stored for reference; passed to ray_tracer separately
     packing_fraction: float = 0.9069 # hex close-pack
+    wall_material:    str   = 'alumina'  # Fix 1: material for complex dielectric cutoff
     kind: str = 'honeycomb'
 
     def __post_init__(self):
@@ -560,13 +561,39 @@ class HoneycombCavityCell:
         # dr/dz = 0 (straight cylinder)
         self._dr_dz = 0.0
 
-        # Waveguide modal cutoff (Bug #13):
-        #   TE11 mode of a circular channel:  λ_c = 1.706 · d.
-        #   When the pore diameter falls below λ/1.71 the interior thermal
-        #   emission converts to exponentially-decaying evanescent waves that
-        #   fail to reach the aperture (Narayanaswamy & Chen, PRB 2004).
-        self.lambda_c_um = 1.706 * self.diameter_um
-        self.lambda_c    = self.lambda_c_um * 1e-6
+        # Fix 1 (peer-review): Waveguide modal cutoff for TE11 in a lossy dielectric
+        # cylindrical channel.  The PEC approximation λ_c = π·D/j'₁,₁ ≈ 1.706·D
+        # assumes infinite conductivity (σ→∞), which is unphysical for alumina
+        # (PAA) walls.  The correct cutoff is the complex root of the dielectric
+        # boundary characteristic equation solved by solve_te11_mode_complex
+        # (waveguide_modes.py, method='perturbation' = first-order lossy correction
+        # to the PEC eigenvalue using the actual complex ε_r(ω) of the wall).
+        #
+        # Reference: Narayanaswamy & Chen, PRB 70, 125101 (2004); Jackson §8.4.
+        #
+        # The effective cutoff λ_c,eff is the wavelength at which Re(β) → 0.
+        # We probe it at a wavelength equal to the PEC estimate (as a seed) and
+        # read back the corrected cutoff from the solver.
+        _lambda_c_pec = 1.706 * self.diameter_um   # PEC seed (µm)
+        try:
+            from waveguide_modes import solve_te11_mode_complex
+            _modal = solve_te11_mode_complex(
+                diameter_um=self.diameter_um,
+                wavelength_um=_lambda_c_pec,   # probe near cutoff
+                material=self.wall_material,
+                method='perturbation',
+            )
+            # The returned 'cutoff_wavelength_um' is the dielectric-corrected λ_c.
+            # For lossy walls the effective cutoff shifts relative to the PEC value.
+            _lambda_c_eff = _modal.get('cutoff_wavelength_um', _lambda_c_pec)
+            if _lambda_c_eff > 0 and math.isfinite(_lambda_c_eff):
+                self.lambda_c_um = float(_lambda_c_eff)
+            else:
+                self.lambda_c_um = _lambda_c_pec   # fallback
+        except Exception:
+            # Solver unavailable — fall back to PEC root (backward compatible).
+            self.lambda_c_um = _lambda_c_pec
+        self.lambda_c = self.lambda_c_um * 1e-6
 
     def channel_cutoff_wavelength_um(self) -> float:
         """Modal cutoff wavelength (µm). Emission λ > λ_c is evanescent."""
@@ -583,27 +610,31 @@ class HoneycombCavityCell:
         surface_type in {'aperture', 'wall', 'base'}
         """
         EPS = 1e-13
-        candidates = []
+        t_best = float('inf')
+        surf_best = 'none'
+        n_x = n_y = n_z = 0.0
 
         # Aperture at z = H (escapes upward)
         if direction[2] > EPS:
             t_top = (self.H - pos[2]) / direction[2]
-            if t_top > EPS:
-                candidates.append((t_top, 'aperture', np.array([0., 0., 1.])))
+            if t_top > EPS and t_top < t_best:
+                t_best, surf_best = t_top, 'aperture'
+                n_x, n_y, n_z = 0.0, 0.0, 1.0
 
         # Base at z = 0
         if direction[2] < -EPS:
             t_bot = (0.0 - pos[2]) / direction[2]
-            if t_bot > EPS:
-                candidates.append((t_bot, 'base', np.array([0., 0., 1.])))
+            if t_bot > EPS and t_bot < t_best:
+                t_best, surf_best = t_bot, 'base'
+                n_x, n_y, n_z = 0.0, 0.0, 1.0
 
         # Cylinder wall: x^2 + y^2 = R^2 (inside looking out)
         dx, dy = direction[0], direction[1]
         px, py = pos[0], pos[1]
-        A = dx*dx + dy*dy
-        B = 2.0 * (px*dx + py*dy)
-        C = px*px + py*py - self.R**2
-        disc = B*B - 4.0*A*C
+        A = dx * dx + dy * dy
+        B = 2.0 * (px * dx + py * dy)
+        C = px * px + py * py - self.R ** 2
+        disc = B * B - 4.0 * A * C
 
         if A > 1e-30 and disc >= 0.0:
             sq = math.sqrt(disc)
@@ -611,19 +642,17 @@ class HoneycombCavityCell:
                 t_c = (-B + sign * sq) / (2.0 * A)
                 if t_c > EPS:
                     z_hit = pos[2] + direction[2] * t_c
-                    if 0.0 <= z_hit <= self.H:
+                    if 0.0 <= z_hit <= self.H and t_c < t_best:
                         x_hit = px + dx * t_c
                         y_hit = py + dy * t_c
+                        t_best, surf_best = t_c, 'wall'
                         # Outward normal for interior hit points TOWARDS cylinder axis (inward)
-                        nx = -x_hit / self.R
-                        ny = -y_hit / self.R
-                        n_out = np.array([nx, ny, 0.0])  # inward normal (facing centre)
-                        candidates.append((t_c, 'wall', n_out))
+                        n_x, n_y, n_z = -x_hit / self.R, -y_hit / self.R, 0.0
                     break
 
-        if not candidates:
+        if t_best == float('inf'):
             return float('inf'), 'none', np.zeros(3)
-        return min(candidates, key=lambda c: c[0])
+        return t_best, surf_best, np.array([n_x, n_y, n_z])
 
     def sample_point_on_walls(self) -> Tuple[np.ndarray, np.ndarray]:
         """Uniform random point on cylindrical wall surface."""

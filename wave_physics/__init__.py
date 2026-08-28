@@ -8,21 +8,31 @@ through the rest of the codebase.
 
 Main modules
 ------------
-conventions          : centralized electromagnetic sign / unit conventions.
-schemas              : versioned WaveResponse dataclass and serialization.
-analytic_benchmarks  : closed-form textbook limits used for validation.
-cached_solver        : CachedWaveSolver adapter that loads .json / .h5 tables.
-make_cache           : builds a default analytic-benchmark response cache.
+conventions        : centralized EM sign / unit conventions.
+schemas            : versioned WaveResponse / NearFieldResponse dataclasses
+                     and serialization.
+analytic_benchmarks: closed-form textbook limits used for validation.
+cached_solver      : CachedWaveSolver adapter that loads .json/.h5 tables.
+near_field_greens  : Track B2 — structured near-field Green tensor + LDOS
+                     solver (offline, cache-driven).
 
-The default solver remains the Monte Carlo ray tracer (wave_model == 'ray');
-the cached path (wave_model == 'cached') is an opt-in service that consumes
-pre-calculated full-wave data through the WaveResponse contract.
+The default solver remains the Monte Carlo ray tracer
+(wave_model == 'ray'); the cached path (wave_model == 'cached') is an
+opt-in service that consumes pre-calculated full-wave data through the
+WaveResponse contract.  Structured near-field corrections (Track B2)
+are loaded via the NearFieldResponse cache when the gap falls below
+lambda_peak / (2*pi).
 """
 
 from . import conventions
 from . import schemas
 from . import analytic_benchmarks
 from . import cached_solver
+
+try:
+    from . import near_field_greens
+except ImportError:  # pragma: no cover - optional
+    near_field_greens = None  # type: ignore
 
 __version__ = '0.1.0'
 
@@ -31,5 +41,6 @@ __all__ = [
     'schemas',
     'analytic_benchmarks',
     'cached_solver',
+    'near_field_greens',
     '__version__',
 ]

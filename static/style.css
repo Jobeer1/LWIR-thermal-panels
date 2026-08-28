@@ -568,3 +568,319 @@ button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
     .input-row { grid-template-columns: 1fr; }
     .mode-selector { flex-direction: column; }
 }
+/* =====================================================================
+   UX/UI IMPROVEMENTS — Typography, status strip, executive summary
+   ===================================================================== */
+
+/* ---------- Number scaling ---------- */
+.val-lg { font-size: 2.6rem !important; }
+.val-md { font-size: 1.8rem !important; }
+.val-sm { font-size: 1.2rem !important; }
+.val-ci {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    font-family: 'DM Sans', sans-serif;
+    display: block;
+    margin-top: 0.1rem;
+    opacity: 0.8;
+}
+.val-ci strong { color: var(--teal); font-weight: 600; }
+
+/* ---------- Physics status strip ---------- */
+.physics-status-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.6rem 1rem;
+    background: rgba(255,255,255,0.6);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+}
+.status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.status-dot.safe    { background: var(--green); }
+.status-dot.warning { background: var(--amber); }
+.status-dot.critical{ background: var(--red); }
+.status-regime {
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+/* ---------- Collapsible sections ---------- */
+.collapsible {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.6rem;
+    overflow: hidden;
+}
+.collapsible-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 0.9rem;
+    background: rgba(255,255,255,0.5);
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    font-size: 0.82rem;
+    color: var(--text);
+    transition: background 0.2s;
+}
+.collapsible-header:hover { background: rgba(255,255,255,0.8); }
+.collapsible-header .arrow {
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+    color: var(--text-muted);
+}
+.collapsible.open .collapsible-header .arrow { transform: rotate(90deg); }
+.collapsible-body {
+    padding: 0.6rem 0.9rem 0.9rem;
+    display: none;
+    background: rgba(255,255,255,0.3);
+}
+.collapsible.open .collapsible-body { display: block; }
+
+/* ---------- Quick presets ---------- */
+.presets-row {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.8rem;
+}
+.preset-btn {
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+/* ---------- Energy flow bars ---------- */
+.energy-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.5rem 0;
+}
+.flow-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.78rem;
+}
+.flow-label {
+    width: 90px;
+    flex-shrink: 0;
+    text-align: right;
+    color: var(--text-dim);
+    font-weight: 500;
+}
+.flow-bar-track {
+    flex: 1;
+    height: 14px;
+    background: rgba(0,35,149,0.06);
+    border-radius: 999px;
+    overflow: hidden;
+    position: relative;
+}
+.flow-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.6s ease;
+    min-width: 4px;
+}
+.flow-bar-fill.net   { background: var(--grad-primary); }
+.flow-bar-fill.emiss { background: linear-gradient(135deg,#e5a900,#b77900); }
+.flow-bar-fill.loss  { background: linear-gradient(135deg,#6b8174,#465c50); }
+.flow-value {
+    width: 80px;
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text);
+    text-align: left;
+}
+
+/* ---------- Cavity SVG ---------- */
+.cavity-svg-container { margin: 0.5rem 0; text-align: center; }
+.cavity-svg-container svg { max-width: 100%; height: auto; }
+.cavity-dim-label { font-size: 0.65rem; fill: var(--text-muted); font-family: 'DM Sans', sans-serif; }
+
+/* ---------- Card hierarchy ---------- */
+.result-card.primary-card {
+    grid-column: span 2;
+    border-color: rgba(0,122,77,0.35) !important;
+    background: rgba(0,122,77,0.04) !important;
+}
+.result-card.primary-card .value { font-size: 2.4rem !important; }
+.result-card.secondary-card {
+    border-color: rgba(0,35,149,0.12) !important;
+    background: rgba(255,255,255,0.5) !important;
+}
+
+/* ---------- Download prominence ---------- */
+.download-btn-prominent {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1.1rem;
+    background: var(--grad-primary);
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 2px 8px rgba(0,122,77,0.2);
+}
+.download-btn-prominent:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0,122,77,0.3);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 600px) {
+    .result-card.primary-card { grid-column: span 1; }
+    .physics-status-strip { flex-direction: column; align-items: flex-start; }
+    .flow-row { flex-wrap: wrap; }
+    .flow-value { width: auto; }
+}
+@media (max-width: 768px) {
+    .presets-row { justify-content: center; }
+}
+    background: rgba(255,255,255,0.5);
+    font-size: 0.72rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.preset-btn:hover {
+    background: var(--teal);
+    color: #fff;
+    border-color: var(--teal);
+    transform: translateY(-1px);
+}
+
+/* ---------- Regime gauge ---------- */
+.regime-gauge-container { margin: 0.5rem 0 0.8rem; }
+.gauge-track {
+    position: relative;
+    height: 12px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        #002395 0%, #002395 33%,
+        #c65b1a 33%, #c65b1a 66%,
+        #c82f2f 66%, #c82f2f 100%);
+    overflow: visible;
+}
+.gauge-needle {
+    position: absolute;
+    top: -4px;
+    width: 3px; height: 20px;
+    background: #17231d;
+    border-radius: 2px;
+    transform: translateX(-50%);
+    transition: left 0.4s ease;
+    z-index: 2;
+}
+/* ---------- Interactive radiation diagram ---------- */
+.radiation-diagram {
+    position: relative;
+    background: rgba(0,35,149,0.03);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin: 0.5rem 0 0.8rem;
+    overflow: hidden;
+}
+.radiation-diagram canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.rad-diagram-labels {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.3rem 1rem 0.5rem;
+    font-size: 0.78rem;
+    pointer-events: none;
+}
+.rad-label {
+    text-align: center;
+    color: var(--text-dim);
+    font-weight: 600;
+}
+.rad-label.plate-a { color: var(--orange); }
+.rad-label.plate-b { color: var(--blue); }
+.rad-label.gap { color: var(--text-muted); font-weight: 400; }
+
+/* ---------- Interactive modal cutoff visual ---------- */
+.modal-visual {
+    position: relative;
+    background: rgba(0,0,0,0.02);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin: 0.5rem 0 0.8rem;
+    overflow: hidden;
+}
+.modal-visual canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.modal-visual-labels {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 0;
+    pointer-events: none;
+}
+.mod-label {
+    position: absolute;
+    bottom: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    color: var(--text-dim);
+}
+
+
+.gauge-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+.gauge-label { text-align: center; flex: 1; }
+.gauge-label.active { font-weight: 700; color: var(--text); }
+    border-radius: 999px;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.status-regime.ray       { background: rgba(0,35,149,0.1); color: var(--blue); border:1px solid rgba(0,35,149,0.25); }
+.status-regime.full_wave { background: rgba(197,87,35,0.12); color: var(--orange); border:1px solid rgba(197,87,35,0.3); }
+.status-regime.emt       { background: rgba(200,47,47,0.1); color: var(--red); border:1px solid rgba(200,47,47,0.2); }
+.status-regime.near_field{ background: rgba(0,122,77,0.1); color: var(--teal); border:1px solid rgba(0,122,77,0.25); }
+
+/* ---------- Executive summary ---------- */
+.exec-summary {
+    background: rgba(0,122,77,0.06);
+    border-radius: var(--radius-sm);
+    border-left: 4px solid var(--teal);
+    padding: 0.85rem 1.1rem;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    display: none;
+}
+.exec-summary.visible { display: block; }
+.exec-summary strong { color: var(--text); }

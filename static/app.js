@@ -65,6 +65,30 @@ fullGapCb.addEventListener('change', () => {
     gapMcRow.style.display = fullGapCb.checked ? '' : 'none';
 });
 
+
+// ---- Collapsible handlers -------------------------------------------------
+document.querySelectorAll(".collapsible-header").forEach(function(hdr){
+    hdr.addEventListener("click",function(){var p=hdr.closest(".collapsible");if(p)p.classList.toggle("open");});
+});
+
+// ---- Quick presets ---------------------------------------------------------
+var PRESETS={
+    subwave:{temp_a:200,temp_b:200,temp_surr:3,emissivity_a:0.981,emissivity_a_back:0.081,height:200.001,gap:200.001,cavity_diameter:4,wall_thickness:0.051,emissivity_cnt_hc:0.8,emissivity_base_hc:0.05,eps_flat_wall:0.8,n_photons:2000},
+    propagating:{temp_a:3000,temp_b:3000,temp_surr:3,emissivity_a:0.981,emissivity_a_back:0.081,height:200.001,gap:200.001,cavity_diameter:4,wall_thickness:0.051,emissivity_cnt_hc:0.8,emissivity_base_hc:0.05,eps_flat_wall:0.8,n_photons:2000},
+    shortwave:{temp_a:12000,temp_b:12000,temp_surr:3,emissivity_a:0.981,emissivity_a_back:0.081,height:200.001,gap:200.001,cavity_diameter:4,wall_thickness:0.051,emissivity_cnt_hc:0.8,emissivity_base_hc:0.05,eps_flat_wall:0.8,n_photons:2000},
+    room:{temp_a:300,temp_b:300,temp_surr:300,emissivity_a:0.981,emissivity_a_back:0.081,height:200.001,gap:200.001,cavity_diameter:4,wall_thickness:0.051,emissivity_cnt_hc:0.8,emissivity_base_hc:0.05,eps_flat_wall:0.8,n_photons:2000},
+};
+document.querySelectorAll("[data-preset]").forEach(function(btn){
+    btn.addEventListener("click",function(){
+        var key=btn.dataset.preset;
+        window.switchMode("honeycomb");
+    if(!PRESETS[key])return;
+        for(var k in PRESETS[key]){var id=document.getElementById(k);if(id)id.value=PRESETS[key][k];}
+        document.querySelectorAll(".collapsible").forEach(function(c){c.classList.add("open");});
+        setTimeout(function(){document.getElementById("sim-form").requestSubmit();},100);
+    });
+});
+
 // ---- Form submit ---------------------------------------------------------
 
 document.getElementById('sim-form').addEventListener('submit', async (e) => {
@@ -139,6 +163,9 @@ document.getElementById('sim-form').addEventListener('submit', async (e) => {
 // ---- Result rendering ---------------------------------------------------
 
 function _renderResults(r) {
+    // Executive summary
+    _renderExecutiveSummary(r);
+
     // Solver-mode badge (Phase 6): ray fallback vs cached full-wave
     _updateSolverBadge(r.solver_mode, r.wave_model, r.wave_response_info);
     
@@ -354,6 +381,10 @@ function _animateValue(id, start, end, duration, suffix) {
     if (!el) return;
     const endNum = parseFloat(end);
     let startTs = null;
+    // Executive summary (plain English)
+    _renderExecutiveSummary(r);
+
+
     const step = (ts) => {
         if (!startTs) startTs = ts;
         const progress = Math.min((ts - startTs) / duration, 1);
@@ -364,4 +395,98 @@ function _animateValue(id, start, end, duration, suffix) {
         else el.innerHTML = endNum.toFixed(2) + suffix;
     };
     requestAnimationFrame(step);
+}
+
+
+// ---- Physics status strip -----------------------------------------------
+function _renderStatusStrip(r) {
+    var el=document.getElementById("physics-status-strip");
+    if(!el)return; if(!r){el.innerHTML="";return;}
+    var conf=Number(r.physics_confidence||100);
+    var dc="safe",st="Normal confidence";
+    if(conf<60){dc="critical";st="Low confidence";}
+    else if(conf<85){dc="warning";st="Moderate confidence";}
+    var rg=(r.physics_orchestrator||{}).geometry_regime||"?";
+    el.innerHTML="<span class=\"status-dot "+dc+"\"></span> <span>"+st+"</span> <span class=\"status-regime\">"+rg+"</span>";
+}
+
+// ---- Regime gauge -------------------------------------------------------
+function _renderRegimeGauge(orch,T){
+    var el=document.getElementById("regime-gauge");
+    if(!el||!orch||!T){if(el)el.innerHTML="";return;}
+    var pct=Math.min(100,Math.max(0,(Number(T)/16000)*100));
+    el.innerHTML="<div class=\"gauge-track\"><div class=\"gauge-needle\" style=\"left:"+pct+"%;\"></div></div><div class=\"gauge-labels\"><span class=\"gauge-label\">RAY</span><span class=\"gauge-label\">FULLWAVE</span><span class=\"gauge-label\">EMT</span></div><div style=\"text-align:center;font-size:0.72rem;color:var(--text-muted);\">T="+Number(T).toLocaleString()+"K "+(orch.geometry_regime||"?")+"</div>";
+}
+
+// ---- Energy flow bars ---------------------------------------------------
+function _renderEnergyFlow(r){
+    var el=document.getElementById("energy-flow");
+    if(!el||!r||!r.flux_emitted_b){if(el)el.innerHTML="";return;}
+    var qE=Number(r.flux_emitted_b||0),qN=Number(r.net_flux_A_front||0),qB=Number(r.q_ab_net||r.net_back_loss||0),mv=Math.max(qE,qN,qB,1);
+    var rows="";
+    var arr=[["Emitted",qE,"emiss"],["Net A->B",qN,"net"],["Lost back",qB,"loss"]];
+    for(var i=0;i<3;i++){var d=arr[i];rows=rows+"<div class=\"flow-row\"><span class=\"flow-label\">"+d[0]+"</span><div class=\"flow-bar-track\"><div class=\"flow-bar-fill "+d[2]+"\" style=\"width:"+Math.max(2,d[1]/mv*100)+"%;\"></div></div><span class=\"flow-value\">"+_fmtW(d[1],0)+"</span></div>";}
+    el.innerHTML=rows+"<div style=\"font-size:0.68rem;color:var(--text-muted);text-align:right;\">W/m2</div>";
+}
+
+// ---- Executive summary --------------------------------------------------
+function _renderExecutiveSummary(r){
+    var el=document.getElementById("exec-summary");
+    if(!el)return;
+    if(!r||!r.epsilon_b){el.classList.remove("visible");el.innerHTML="";return;}
+    var eB=(r.epsilon_b*100).toFixed(1),aE=(r.alpha_eff*100).toFixed(1),dR=Number(r.decoupling_ratio||0),qN=Number(r.net_flux_A_front||0),tS=Number(r.T_B_stag||0);
+    var l=[];
+    if(dR>3)l.push("Cavity traps light: "+aE+"% absorbed, only <b>"+eB+"%</b> re-emitted &mdash; <b>"+dR.toFixed(1)+"x</b> decoupling.");
+    else l.push("Near-blackbody: epsB="+eB+"%, alpha_eff="+aE+"%.");
+    if(qN>1){var z=qN>=1e6?(qN/1e6).toFixed(1)+" MW/m2":qN>=1e3?(qN/1e3).toFixed(1)+" kW/m2":qN.toFixed(1)+" W/m2";l.push("Net flux <b>"+z+"</b>.");}
+    if(tS>0)l.push("Stagnation: <b>"+(tS-273.15).toFixed(1)+"C ("+tS.toFixed(1)+" K)</b>.");
+    el.innerHTML=l.join(" ");el.classList.add("visible");
+}
+
+
+// ---- Modal cutoff visual ----------------------------------------------------
+function _renderModalVisual(r){
+    var c=document.getElementById("modal-canvas");if(!c)return;
+    var ctx=c.getContext("2d"),dpr=window.devicePixelRatio||1;
+    c.width=720*dpr;c.height=120*dpr;c.style.width="720px";c.style.height="120px";
+    ctx.scale(dpr,dpr);ctx.clearRect(0,0,720,120);
+    var lC=Number(r.cutoff_wavelength_um||0),tB=Number(r.temp_b||r.temperature_B||300);
+    var lP=r.operator_wavelength_um||(2898/Math.max(tB,1));
+    var fP=Number(r.propagating_fraction||0),fE=Math.max(0,1-fP);
+    if(!lC||!lP){ctx.fillStyle="#6b8174";ctx.font="12px DM Sans";ctx.textAlign="center";ctx.fillText("No data",360,62);return;}
+    var x0=30,xM=690,yB=102,yT=10;
+    var ls=function(lam){return x0+660*Math.log(lam/0.1)/Math.log(1000);};
+    var cX=ls(lC);
+    ctx.fillStyle="rgba(0,122,77,0.10)";ctx.fillRect(x0,yT,cX-x0,yB-yT);
+    ctx.fillStyle="rgba(200,47,47,0.08)";ctx.fillRect(cX,yT,xM-cX,yB-yT);
+    ctx.beginPath();
+    for(var i=0;i<=200;i++){var lam=0.1*Math.exp(i/200*Math.log(1000));var x=lam/100;var s=Math.pow(x,-5)/(Math.exp(1/Math.max(x*120,0.001))-1);var px=ls(lam),py=yB-s*3400;i===0?ctx.moveTo(px,Math.min(py,yB)):ctx.lineTo(px,Math.min(py,yB));}
+    ctx.strokeStyle="#17231d";ctx.lineWidth=2;ctx.stroke();
+    function dl(pos,color){ctx.beginPath();ctx.moveTo(pos,yT);ctx.lineTo(pos,yB);ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);}
+    dl(ls(lP),"#c65b1a");dl(cX,"#002395");
+    ctx.fillStyle="#c65b1a";ctx.font="bold 9px DM Sans";ctx.textAlign="center";ctx.fillText("peak="+Number(lP).toFixed(2)+"um",ls(lP),yT-4);
+    ctx.fillStyle="#002395";ctx.fillText("cutoff="+lC.toFixed(2)+"um",cX,yB+14);
+    ctx.fillStyle="#007a4d";ctx.font="9px DM Sans";ctx.textAlign="left";ctx.fillText("Prop:"+(fP*100).toFixed(3)+"%",x0+4,yT+12);
+    ctx.fillStyle="#c82f2f";ctx.fillText("Evan:"+(fE*100).toFixed(3)+"%",x0+4,yT+26);
+    if(cX-x0>40){ctx.fillStyle="#007a4d";ctx.fillRect(x0,yT+34,cX-x0,6);ctx.fillStyle="#c82f2f";ctx.fillRect(cX,yT+34,xM-cX,6);}
+}
+
+// ---- Radiation diagram (animated) -------------------------------------------
+var _radAnimRunning=false;
+function _renderRadiationDiagram(r){
+    var c=document.getElementById("rad-canvas");if(!c)return;
+    var ctx=c.getContext("2d"),dpr=window.devicePixelRatio||1;
+    if(!c._init){c._W=720;c._H=240;c.width=c._W*dpr;c.height=c._H*dpr;c.style.width=c._W+"px";c.style.height=c._H+"px";c._init=true;}
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,720,240);
+    ctx.fillStyle="#c65b1a";ctx.fillRect(56,60,8,120);
+    ctx.fillStyle="#002395";ctx.fillRect(656,60,8,120);
+    ctx.fillStyle="#17231d";ctx.font="bold 11px DM Sans";ctx.textAlign="center";
+    ctx.fillText("A",60,175);ctx.fillText("B",660,175);
+    var now=Date.now()/1000,nP=Math.min(20,Math.max(5,600/24));
+    for(var i=0;i<nP;i++){var t=((now*0.3+i/nP)%1);
+        ctx.beginPath();ctx.arc(60+t*600,120+Math.sin(t*Math.PI*3+i)*18,2+3*(1-Math.abs(t-0.5)*2),0,7);
+        ctx.fillStyle="rgba(197,87,35,"+((0.4+0.6*(1-Math.abs(t-0.5)*2))*0.7)+")";ctx.fill();}
+    ctx.fillStyle="#6b8174";ctx.font="9px DM Sans";ctx.textAlign="center";
+    var q=r.net_flux_A_front;if(q){var qs=q>=1e6?(q/1e6).toFixed(1)+" MW/m2":q>=1e3?(q/1e3).toFixed(1)+" kW/m2":q.toFixed(1)+" W/m2";ctx.fillText("q="+qs,360,18);}
+    if(!_radAnimRunning){_radAnimRunning=true;(function loop(){if(!_radAnimRunning)return;window._radAnimId=requestAnimationFrame(loop);_renderRadiationDiagram(r);})();}
 }

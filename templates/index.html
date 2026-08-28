@@ -35,8 +35,18 @@
                     <input type="hidden" id="geometry_mode" name="geometry_mode" value="honeycomb">
 
                     <!-- ========== PLATE A ========== -->
-                    <div class="section-label">Plate A — Flat Source</div>
+                    <!-- Quick presets -->
+                    <div class="presets-row">
+                        <button type="button" class="preset-btn" data-preset="subwave">Sub-wavelength (200 K)</button>
+                        <button type="button" class="preset-btn" data-preset="propagating">Propagating (3000 K)</button>
+                        <button type="button" class="preset-btn" data-preset="shortwave">Short-wavelength (12000 K)</button>
+                        <button type="button" class="preset-btn" data-preset="room">Room temp (300 K)</button>
+                    </div>
 
+                    <!-- Collapsible: Plate A -->
+                    <div class="collapsible open">
+                        <div class="collapsible-header">Plate A — Flat Source <span class="arrow">&#9654;</span></div>
+                        <div class="collapsible-body">
                     <div class="input-row">
                         <div class="input-group">
                             <label for="temp_a">Temperature (K)</label>
@@ -47,7 +57,6 @@
                             <input type="number" id="emissivity_a" name="emissivity_a" value="1.0" step="0.01" max="1" min="0.001" required>
                         </div>
                     </div>
-
                     <div class="input-row">
                         <div class="input-group">
                             <label for="width_a">Width (µm)</label>
@@ -58,11 +67,14 @@
                             <input type="number" id="depth_a" name="depth_a" value="1000" step="1" min="1" required>
                         </div>
                     </div>
-
                     <div class="input-row">
                         <div class="input-group">
                             <label for="emissivity_a_back">Back Emissivity (ε<sub>back</sub>)</label>
                             <input type="number" id="emissivity_a_back" name="emissivity_a_back" value="0.1" step="0.01" max="1" min="0.001">
+                        </div>
+                    </div>
+                        </div>
+                    </div>
                         </div>
                         <div class="input-group">
                             <label for="material_a">Material (spectral)
@@ -78,7 +90,11 @@
                         </div>
                     </div>
 
+<!-- Collapsible: Gap & Environment -->
+<div class="collapsible open">
                     <!-- ========== GAP ========== -->
+    <div class="collapsible-header">Gap & Environment <span class="arrow">▶</span></div>
+    <div class="collapsible-body">
                     <div class="section-label">Gap &amp; Environment</div>
 
                     <div class="input-row">
@@ -93,8 +109,14 @@
                             <input type="number" id="temp_surr" name="temp_surr" value="300" step="1" min="0" required>
                         </div>
                     </div>
+        </div>
+</div>
 
+<!-- Collapsible: Plate B — Cavity / CNT Panel -->
+<div class="collapsible open">
                     <!-- ========== PLATE B — shared ========== -->
+    <div class="collapsible-header">Plate B — Cavity / CNT Panel <span class="arrow">▶</span></div>
+    <div class="collapsible-body">
                     <div class="section-label">Plate B — Cavity / CNT Panel</div>
 
                     <div class="input-row">
@@ -188,7 +210,13 @@
                         </div>
                     </div>
 
+<!-- Collapsible: Monte Carlo Settings -->
+<div class="collapsible open">
                     <!-- ========== MC SETTINGS ========== -->
+    <div class="collapsible-header">Monte Carlo Settings <span class="arrow">▶</span></div>
+    <div class="collapsible-body">
+        </div>
+</div>
                     <div class="section-label">Monte Carlo Settings</div>
 
                     <div class="input-row">
@@ -213,6 +241,8 @@
                     </div>
 
                     <!-- ========== WAVE-MODEL SOLVER SELECTOR (Phase 0/6) ========== -->
+        </div>
+</div>
                     <div class="section-label">Cavity Solver</div>
                     <div class="input-group">
                         <label for="wave_model">Solver Mode
@@ -247,10 +277,44 @@
                 <!-- Warning banners -->
                 <div id="near-field-banner" class="warning-banner hidden"></div>
 
+                <!-- Physics Orchestrator diagnostic banner -->
+                <div id="orchestrator-banner" class="warning-banner hidden" style="margin-top:8px;"></div>
+
+                <!-- Physics status strip -->
+                <div id="physics-status-strip" class="physics-status-strip"></div>
+
+                <!-- Executive summary -->
+                <div id="exec-summary" class="exec-summary"></div>
+
+                <!-- Regime gauge -->
+                <div id="regime-gauge" class="regime-gauge-container"></div>
+
+                <!-- Energy flow -->
+                <div id="energy-flow" class="energy-flow"></div>
+
+                <!-- Interactive: Radiation exchange diagram -->
+                <div id="radiation-diagram" class="radiation-diagram">
+                    <canvas id="rad-canvas" width="720" height="240"></canvas>
+                    <div class="rad-diagram-labels">
+                        <span class="rad-label plate-a">A<br><small>ε<sub>A</sub></small></span>
+                        <span class="rad-label gap"><small>gap</small></span>
+                        <span class="rad-label plate-b">B<br><small>ε<sub>B</sub></small></span>
+                    </div>
+                </div>
+
+                <!-- Interactive: Modal cutoff visual -->
+                <div id="modal-visual" class="modal-visual">
+                    <canvas id="modal-canvas" width="720" height="120"></canvas>
+                    <div class="modal-visual-labels">
+                        <span class="mod-label" id="mod-lambda-c">λ<sub>c</sub></span>
+                        <span class="mod-label" id="mod-lambda-p">λ<sub>peak</sub></span>
+                    </div>
+                </div>
+
                 <div class="results-container">
 
                     <!-- Net flux — hero card -->
-                    <div class="result-card accent-card hero-card">
+                    <div class="result-card primary-card">
                         <h3>Net Radiative Flux q″ (A→B)</h3>
                         <div class="value" id="res-leak">--</div>
                         <p class="unit">W/m² (net, A front face)</p>
@@ -261,7 +325,7 @@
 
                                                 <div class="result-card">
                             <h3>Plate B Eff. Emissivity (ε<sub>B</sub>)</h3>
-                            <div class="value" id="res-epsilon-b">--%</div>
+                            <div class="value val-lg" id="res-epsilon-b">--%</div>
                             <div class="ci-label" id="ci-epsb"></div>
                             <p class="unit" id="res-epsb-breakdown">physical emission (modal-cutoff corrected)</p>
                         </div>
@@ -280,14 +344,14 @@
 
                         <div class="result-card">
                             <h3>Escape Probability P<sub>esc</sub></h3>
-                            <div class="value" id="res-esc">--%</div>
+                            <div class="value val-md" id="res-esc">--%</div>
                             <div class="ci-label" id="ci-pesc"></div>
                             <p class="unit">photons emitted from all surfaces</p>
                         </div>
 
                         <div class="result-card">
                             <h3>Absorptivity α<sub>eff</sub></h3>
-                            <div class="value" id="res-abs">--%</div>
+                            <div class="value val-md" id="res-abs">--%</div>
                             <div class="ci-label" id="ci-alpha"></div>
                             <p class="unit">Kirchhoff check (ext. illumination)</p>
                         </div>
@@ -295,7 +359,7 @@
                         <div class="result-card kirchhoff-card" id="kirchhoff-card">
                                                         <h3>Kirchhoff Consistency |ε<sub>B</sub> − α<sub>eff</sub>|/α<sub>eff</sub></h3>
                             <div class="value" id="res-kirchhoff">--%</div>
-                            <p class="unit">0% = ε_B = α_eff (reciprocity) · ↑ = decoupling (ε_B ≪ α_eff)</p>
+                            <p class="unit">0% = ε_B = α_eff · ↑ = directional decoupling</p>
                         </div>
 
                                                 <div class="result-card">
@@ -324,9 +388,9 @@
                         </div>
 
                         <div class="result-card wave-card">
-                            <h3>ε<sub>B</sub>/α<sub>eff</sub></h3>
+                            <h3>α<sub>eff</sub>/ε<sub>B</sub></h3>
                             <div class="value mono" id="res-decoup">--×</div>
-                            <p class="unit">α_eff ≫ ε_B (sub-wavelength decoupling)</p>
+                            <p class="unit">structured-surface decoupling ratio</p>
                         </div>
 
                         <div class="result-card">
@@ -341,12 +405,12 @@
                     <div class="spectral-row" id="spectral-row">
                         <div class="result-card spectral-card">
                             <h3>ε<sub>A</sub> Planck-weighted</h3>
-                            <div class="value mono" id="res-eps-a-spec" style="font-size:1.5rem;">--</div>
+                            <div class="value mono" id="res-eps-a-spec">--</div>
                             <p class="unit">vs. gray-body input</p>
                         </div>
                         <div class="result-card spectral-card">
                             <h3>Spectral Correction</h3>
-                            <div class="value mono" id="res-spec-corr" style="font-size:1.5rem;">--%</div>
+                            <div class="value mono" id="res-spec-corr">--%</div>
                             <p class="unit">deviation from gray-body ε<sub>A</sub></p>
                         </div>
                     </div>
@@ -356,27 +420,27 @@
                     <div class="results-grid">
                         <div class="result-card accent-card">
                             <h3>Total Net Q<sub>net</sub></h3>
-                            <div class="value mono" id="res-total-heat" style="font-size:1.5rem;">--</div>
+                            <div class="value mono" id="res-total-heat">--</div>
                             <p class="unit">W (A-front + A-back combined)</p>
                         </div>
                         <div class="result-card">
                             <h3>A-front → B coupling</h3>
-                            <div class="value mono" id="res-coupling" style="font-size:1.5rem;">--</div>
+                            <div class="value mono" id="res-coupling">--</div>
                             <p class="unit">W (absorbed by B)</p>
                         </div>
                         <div class="result-card">
                             <h3>A-back → Surroundings</h3>
-                            <div class="value mono" id="res-aback" style="font-size:1.5rem;">--</div>
+                            <div class="value mono" id="res-aback">--</div>
                             <p class="unit">W (back-face loss)</p>
                         </div>
                         <div class="result-card">
                             <h3>Net flux on A-front</h3>
-                            <div class="value mono" id="res-flux-afront" style="font-size:1.5rem;">--</div>
+                            <div class="value mono" id="res-flux-afront">--</div>
                             <p class="unit">W/m² (physical: ε_A≠ε_B mismatch)</p>
                         </div>
                         <div class="result-card wave-card">
                             <h3>Plate B Stagnation Temperature</h3>
-                            <div class="value mono" id="res-t-stag" style="font-size:1.5rem;">--</div>
+                            <div class="value mono" id="res-t-stag">--</div>
                             <p class="unit">°C / K (adiabatic wall: absorbed = emitted)</p>
                         </div>
                     </div>
@@ -393,14 +457,12 @@
                         and fail to reach the aperture (LDOS suppression — Lin PRB 2000;
                         Narayanaswamy &amp; Chen PRB 2004). The reported propagating fraction and
                         rim contribution are calculated for the selected geometry.</p>
-                                                <p>Incident light, by contrast, diffracts around the thin <span id="wall-thickness-val">—</span> µm wall rims
-                        and is trapped by the graded-index surface (α<sub>eff</sub> → 1). This
-                        creates the operational decoupling: <strong>α<sub>eff</sub> ≫
-                        ε<sub>B</sub></strong> — the hallmark of sub-wavelength structured
-                        emitters. Even at T_A = T_B, the emissivity mismatch (ε_A ≠ ε_B) means
-                        one-way radiation flows both ways (A→B: ~ε_A·F·α_eff·σT⁴,
-                        B→A: ~ε_B·F·σT⁴); the physical net A→B flux balances
-                        against the surroundings.</p>
+                                                <p>Incident light can be trapped at the thin wall rims while internally emitted
+                        photons are filtered by the deep cavity and modal cutoff. The model
+                        therefore reports separate effective quantities, <strong>α<sub>eff</sub></strong>
+                        and <strong>ε<sub>B</sub></strong>, and their ratio as directional
+                        decoupling. Net heat flow is obtained from the radiosity balance,
+                        including the cold surroundings.</p>
                     </div>
 
                 </div>
@@ -408,6 +470,6 @@
         </div>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260827-4"></script>
 </body>
 </html>

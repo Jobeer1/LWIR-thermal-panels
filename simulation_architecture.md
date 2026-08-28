@@ -1,252 +1,336 @@
-# Monte Carlo Radiative Heat Transfer Simulation
+# Monte Carlo Radiative Heat Transfer — Architecture
 
-This document explains how the simulator works in plain language while staying faithful to the code.
+This document explains how the simulator works in plain language, with visual
+diagrams for quick understanding.
 
-The app is a small browser-based tool that estimates how much heat passes between two plates when one surface is micro-structured. In practice, that means it models surfaces like honeycomb cavities, CNT forests, or tapered pores, where the top surface can strongly absorb incoming radiation but emit much less thermal radiation from deep inside the structure.
+## 1. What the simulator answers
 
-The main idea is simple:
-
-- the code builds a repeating cavity cell for the textured surface,
-- it runs a Monte Carlo ray-tracing experiment inside that cavity,
-- it estimates how much radiation escapes and how much gets trapped,
-- then it uses a larger radiative enclosure model to calculate net heat transfer between the plates.
-
----
-
-## 1. What the simulator is trying to answer
-
-The simulator answers a practical question:
-
-> If one plate is hot and the other is cooler, how much heat moves across a gap when the cooler plate has a textured cavity surface?
-
-To do that, it estimates:
-
-- how easily thermal photons escape from the cavity,
-- how much incoming radiation from above gets absorbed,
-- how strongly the structured surface emits heat,
-- how much net heat flows between the two plates,
-- what temperature the structured plate would reach if it were thermally isolated.
-
-This is not just a single formula. It is a hybrid model: micro-scale cavity physics plus macro-scale radiative exchange.
+| Question                                         | Output                                     |
+| ------------------------------------------------ | ------------------------------------------ |
+| How easily do thermal photons escape the cavity? | **Escape Probability** P_esc         |
+| How much incoming radiation is absorbed?         | **Effective Absorptivity** alpha_eff |
+| How much does the structured surface emit?       | **Effective Emissivity** epsilon_B   |
+| How much net heat flows between plates?          | **Net Radiative Flux** q             |
+| What temperature does Plate B reach if isolated? | **Stagnation Temperature** T_stag    |
 
 ---
 
-## 2. The app has three layers
-
-| Layer | Files | Purpose |
-|---|---|---|
-| Front end | templates/index.html, static/app.js, static/style.css | Accept user input, call the API, show results |
-| API | app.py | Validate values and run the simulation |
-| Physics engine | simulator.py, ray_tracer.py, geometry.py, sampling.py, spectral.py | Build geometry, run the cavity MC model, solve the enclosure problem |
-
-The whole flow is: user inputs → backend validates → geometry is built → cavity MC analysis runs → enclosure calculation runs → results are returned to the browser.
-
-### 2.1 High-level data flow
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#EAF3FF',
-  'primaryTextColor': '#243B53',
-  'primaryBorderColor': '#3B82F6',
-  'lineColor': '#475569',
-  'secondaryColor': '#E8F7ED',
-  'tertiaryColor': '#FFF7ED',
-  'fontSize': '14px'
-}}}%%
-flowchart LR
-    A[User input] --> B[Flask API]
-    B --> C[Build cavity geometry]
-    C --> D[Monte Carlo cavity experiments]
-    D --> E[Escape probability from emission]
-    D --> F[Absorption probability from incidence]
-    E --> G[Effective emissivity of plate B]
-    F --> H[Effective absorptivity of top surface]
-    G --> I[Four-surface radiosity model]
-    H --> I
-    I --> J[Heat flow, flux, stagnation temperature]
-    J --> K[Results returned to browser]
-```
-
-This is the big picture: the simulator first studies the tiny repeating cavity, then it uses a larger enclosure model to estimate the total heat exchange.
-
----
-
-## 3. The structured surface is represented as a repeating cavity cell
-
-The geometry layer creates a 3-D repeating unit cell that represents the textured surface. Depending on the selected mode, the cell may be:
-
-- a honeycomb cavity,
-- a CNT forest,
-- a tapered frustum cavity,
-- a rectangular pit (legacy option).
-
-Each geometry object stores things like:
-
-- aperture area,
-- wall area,
-- base area,
-- cavity depth,
-- cutoff wavelength,
-- cavity enhancement factor.
-
-The code is not modeling a flat plate; it is modeling a pattern of holes, channels, and walls. Those geometric features matter because they trap light in ways a flat surface cannot.
-
----
-
-## 4. The Monte Carlo part: two experiments on the same cavity
-
-The core function is a cavity Monte Carlo model. It runs two experiments on the same unit cell:
-
-### Experiment 1: Thermal emission from inside the cavity
-
-The code launches many photons from the cavity walls and base. Each photon gets:
-
-- a random starting point on the emitting surface,
-- a random direction,
-- a wavelength sampled from a Planck distribution,
-- a chance to escape, get absorbed, or bounce again.
-
-After many photons, the code estimates the probability of escape, `p_esc`.
-
-This gives the simulator a way to estimate how effectively the cavity emits thermal radiation out through the opening.
-
-### Experiment 2: Incoming radiation from above
-
-The code also launches photons downward through the aperture, then tracks whether they are absorbed or reflected back out.
-
-This produces an effective absorptivity, `alpha_eff`, for the top surface under external illumination.
-
-The important point is that the code separates two behaviors:
-
-- how the surface absorbs incoming light from above,
-- how it emits thermal radiation from inside its own cavity.
-
-Those are not always the same for a textured structure.
-
----
-
-## 5. Why the structure can absorb well but emit poorly
-
-This is the key physical idea behind the model.
-
-Every cavity has a cutoff wavelength. If a photon wavelength is below the cutoff, it can propagate through the cavity. If it is above the cutoff, it becomes evanescent and decays rather than escaping efficiently.
-
-In plain terms:
-
-- incoming radiation can be captured near the opening,
-- but thermal photons generated deeper inside the cavity may be strongly confined,
-- the geometry suppresses their ability to leave the surface.
-
-This creates the important difference between high absorptivity and low emissivity.
-
-### 5.1 The cutoff decision in the code
+## 2. High-level data flow
 
 ```mermaid
 flowchart TD
-    A[Photon launched] --> B[Sample wavelength and direction]
-    B --> C{Is wavelength above cutoff?}
-    C -->|No| D[Propagating mode: trace through cavity]
-    C -->|Yes| E[Evanescent mode: decays before escaping]
-    D --> F[Count escape or absorption]
-    E --> G[Deep wall emission is partly blocked]
-    G --> F
+    %% Class Definitions
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc,font-family:sans-serif;
+    classDef inputNode fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#e0f2fe;
+    classDef orchestrator fill:#0f172a,stroke:#38bdf8,stroke-width:2.5px,color:#38bdf8,font-weight:bold;
+    classDef rayMode fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#ecfdf5;
+    classDef fullWaveMode fill:#3730a3,stroke:#818cf8,stroke-width:1.5px,color:#e0e7ff;
+    classDef emtMode fill:#701a75,stroke:#f0abfc,stroke-width:1.5px,color:#fdf4ff;
+    classDef nearFieldMode fill:#7f1d1d,stroke:#f87171,stroke-width:1.5px,color:#fef2f2;
+    classDef outputNode fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff,font-weight:bold;
+
+    %% Subgraph Structure
+    subgraph ENGINE["🚀 Simulator Pipeline Architecture"]
+        style ENGINE fill:#0f172a,stroke:#0d9488,stroke-width:2px,color:#2dd4bf,font-weight:bold;
+      
+        A["User enters parameters<br/>(geometry, temperature, materials)"] --> B["Flask API<br/>app.py"]
+        B --> C["Build cavity geometry<br/>geometry.py"]
+        C --> D["Physics Orchestrator<br/>regime_selector.py"]
+
+        %% Routed Engine Solvers
+        D -->|RAY| E["Monte Carlo ray tracer<br/>ray_tracer.py"]
+        D -->|FULL_WAVE| F["Waveguide modal solver<br/>waveguide_modes.py"]
+        D -->|EMT| G["Maxwell-Garnett TMM slab<br/>material_optics.py"]
+        D -->|NEAR_FIELD| H["Polder-Van Hove<br/>near_field_radiative_heat.py"]
+
+        %% Aggregation & Exitance
+        E --> I["Effective emissivity ε_B<br/>Effective absorptivity α_eff"]
+        F --> I
+        G --> I
+        H --> I
+
+        I --> J["4-surface radiosity<br/>Net flux, stagnation temperature"]
+        J --> K["Results JSON<br/>+ orchestrator provenance"]
+    end
+
+    %% Apply Classes to Nodes
+    class A,B,C inputNode;
+    class D orchestrator;
+    class E rayMode;
+    class F fullWaveMode;
+    class G emtMode;
+    class H nearFieldMode;
+    class I,J,K outputNode;
+
+    %% Link Styling
+    linkStyle 4 stroke:#34d399,stroke-width:2px,fill:none;
+    linkStyle 5 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 6 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 7 stroke:#f87171,stroke-width:2px,fill:none;
 ```
 
-That is the part of the code that captures the decoupling between surface capture and internal emission.
-
 ---
 
-## 6. The radiative enclosure: converting cavity behavior into total heat flow
+## 3. Physics Orchestrator: regime selection
 
-Once the cavity properties are known, the code treats the whole setup as an enclosure with four surfaces:
+Before any solver runs, the orchestrator computes dimensionless ratios:
 
-1. Plate A front face,
-2. Plate A back face,
-3. Plate B structured surface,
-4. Surroundings.
-
-The model then solves a radiosity network so it can compute:
-
-- direct exchange from plate A to plate B,
-- reflection effects,
-- net heat flow,
-- how much heat comes from each face.
-
-This is the “macro” part of the simulation. The cavity study tells the model what the structured plate “acts like” as an emitter and absorber. The 4-surface enclosure then uses those effective values to estimate the actual thermal exchange between the plates.
-
----
-
-## 7. What the numbers mean in practice
-
-The main outputs are meant to be read as follows:
-
-- `alpha_eff`: how well the top structured surface absorbs incoming radiation.
-- `epsilon_b`: how strongly the structured surface emits thermal radiation.
-- `p_esc`: fraction of internally emitted photons that escape the cavity opening.
-- `total_leakage`: total net radiative heat transfer in the enclosure.
-- `net_flux_A_front`: net heat flux from plate A to plate B.
-- `T_B_stag`: adiabatic temperature the structured plate would reach if it were thermally isolated.
-
-A large difference between `alpha_eff` and `epsilon_b` is not necessarily a bug. In many structured surfaces, it is the expected result of cavity geometry and cutoff physics.
-
----
-
-## 8. The simulation flow in one sentence
-
-The simulator does this:
-
-1. build a repeating cavity geometry,
-2. track random photons inside it,
-3. measure how many escape and how many are absorbed,
-4. convert that into effective emissivity and absorptivity,
-5. solve a larger enclosure problem to find net heat transfer.
-
-That is the real structure of the code.
-
----
-
-## 9. A more user-friendly end-to-end view
+| Ratio                        | Meaning                              | Threshold                                     |
+| ---------------------------- | ------------------------------------ | --------------------------------------------- |
+| **lambda/D**           | Wavelength vs. feature diameter      | < 0.2 → RAY, 0.2–5 → FULL_WAVE, > 5 → EMT |
+| **lambda/P**           | Wavelength vs. pitch                 | EMT when both D, P ≪ lambda                  |
+| **d_gap/(lambda/2pi)** | Gap vs. evanescent tunnelling length | < 1 → NEAR_FIELD                             |
+| **t_wall/delta**       | Wall thickness vs. absorption depth  | Optically thin if < 0.5                       |
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#E0F2FE',
-  'primaryTextColor': '#0F172A',
-  'primaryBorderColor': '#0284C7',
-  'lineColor': '#334155',
-  'secondaryColor': '#DCFCE7',
-  'tertiaryColor': '#FEF3C7',
-  'fontSize': '14px'
-}}}%%
 flowchart LR
-    A[Hot plate A] --> B[View factor and gap geometry]
-    B --> C[Structured plate B cavity]
-    C --> D[Photon escape statistics]
-    C --> E[Photon capture statistics]
-    D --> F[Effective emissivity]
-    E --> G[Effective absorptivity]
-    F --> H[Two-plate radiosity model]
-    G --> H
-    H --> I[Net heat flow]
-    I --> J[Displayed results]
+    %% Class Definitions
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc,font-family:sans-serif;
+    classDef decision fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#38bdf8,font-weight:bold;
+    classDef rayMode fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#ecfdf5;
+    classDef fullWaveMode fill:#3730a3,stroke:#818cf8,stroke-width:1.5px,color:#e0e7ff;
+    classDef emtMode fill:#701a75,stroke:#f0abfc,stroke-width:1.5px,color:#fdf4ff;
+    classDef nearFieldMode fill:#7f1d1d,stroke:#f87171,stroke-width:1.5px,color:#fef2f2;
+
+    %% Main Flowchart
+    subgraph ORCH["⚙️ Physics Regime Orchestrator"]
+        style ORCH fill:#0f172a,stroke:#0d9488,stroke-width:2px,color:#2dd4bf,font-weight:bold;
+      
+        T["Temperature T<br/>λ_peak = 2898 / T"] --> R["Compute Ratios<br/>λ/D, λ/P, d/λ, t/δ"]
+        R --> D{"Which Regime?"}
+      
+        D -->|λ/D < 0.2| RAY["RAY<br/>Geometric optics<br/>Monte Carlo ray tracer"]
+        D -->|0.2 ≤ λ/D ≤ 5| FW["FULL_WAVE<br/>Diffraction / resonance<br/>Modal solver or RCWA cache"]
+        D -->|λ/D > 5| EMT["EMT<br/>Maxwell-Garnett<br/>Homogenised slab"]
+        D -->|gap < λ / 2π| NF["NEAR_FIELD<br/>Polder-Van Hove<br/>Green-tensor LDOS"]
+    end
+
+    %% Apply Classes to Nodes
+    class D decision;
+    class RAY rayMode;
+    class FW fullWaveMode;
+    class EMT emtMode;
+    class NF nearFieldMode;
+
+    %% Link Styling
+    linkStyle 2 stroke:#34d399,stroke-width:2px,fill:none;
+    linkStyle 3 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 4 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 5 stroke:#f87171,stroke-width:2px,fill:none;
 ```
 
-This diagram shows the same idea in a simpler way: the cavity physics sets the effective radiative properties, and the enclosure model translates those into actual heat transfer.
+The orchestrator also computes a **confidence score** (0–100%) from regime
+penalties, temperature drift, and material extrapolation status. This is
+surfaced in the UI as a color-coded badge with explicit warnings.
+
+## 4. Monte Carlo cavity experiments
+
+Two photon-scale experiments run inside the repeating unit cell:
+
+```mermaid
+flowchart LR
+    %% Class Definitions
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc,font-family:sans-serif;
+    classDef decision fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#38bdf8,font-weight:bold;
+    classDef guided fill:#064e3b,stroke:#34d399,stroke-width:1.5px,color:#ecfdf5;
+    classDef evanescent fill:#7f1d1d,stroke:#f87171,stroke-width:1.5px,color:#fef2f2;
+    classDef emissionOut fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff,font-weight:bold;
+    classDef incidenceOut fill:#3730a3,stroke:#818cf8,stroke-width:2px,color:#ffffff,font-weight:bold;
+
+    %% Subgraph 1: Internal Emission
+    subgraph E1["🔥 Internal Emission"]
+        style E1 fill:#0f172a,stroke:#0d9488,stroke-width:2px,color:#2dd4bf,font-weight:bold;
+      
+        A1["Photons launched from walls + base"] --> B1["Planck-sampled wavelength"]
+        B1 --> C1{"λ < λ_c ?"}
+        C1 -->|Yes| D1["Guided mode<br/>T = T_ap × exp(-αL)"]
+        C1 -->|No| D2["Evanescent<br/>exp(-2L/δ_ev)"]
+        D1 --> OUT1["P_esc = escape fraction"]
+        D2 --> OUT1
+    end
+
+    %% Subgraph 2: External Incidence
+    subgraph E2["☀️ External Incidence"]
+        style E2 fill:#0f172a,stroke:#6366f1,stroke-width:2px,color:#818cf8,font-weight:bold;
+      
+        A2["Photons enter from aperture"] --> B2["Planck-sampled wavelength"]
+        B2 --> C2{"λ < λ_c ?"}
+        C2 -->|Yes| D3["Trace into cavity<br/>TMM bounces"]
+        C2 -->|No| D4["Diffract around rim"]
+        D3 --> OUT2["α_eff = absorbed fraction"]
+        D4 --> OUT2
+    end
+
+    %% Apply Classes to Nodes
+    class C1,C2 decision;
+    class D1,D3 guided;
+    class D2,D4 evanescent;
+    class OUT1 emissionOut;
+    class OUT2 incidenceOut;
+
+    %% Link Styling
+    linkStyle 2,8 stroke:#34d399,stroke-width:2px,fill:none;
+    linkStyle 3,9 stroke:#f87171,stroke-width:2px,fill:none;
+```
+
+- **P_esc** drives **epsilon_B** (emission side)
+- **alpha_eff** drives **alpha_eff** (absorption side)
+- Their ratio -> **decoupling ratio**
 
 ---
 
-## 10. Important caveat
+## 5. Thin-film and temperature-dependent optics
 
-This is not a full electromagnetic solver for every wavelength, every mode, and every exact material interaction. It is a practical engineering model that combines:
+```mermaid
+flowchart TD
+    %% Class Definitions
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc,font-family:sans-serif;
+    classDef inputNode fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#e0f2fe;
+    classDef moduleHub fill:#0f172a,stroke:#38bdf8,stroke-width:2.5px,color:#38bdf8,font-weight:bold;
+    classDef physicsStep fill:#3730a3,stroke:#818cf8,stroke-width:1.5px,color:#e0e7ff;
+    classDef tmmStep fill:#701a75,stroke:#f0abfc,stroke-width:1.5px,color:#fdf4ff;
+    classDef outputNode fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff,font-weight:bold;
 
-- Monte Carlo tracing for cavity behavior,
-- cutoff physics for evanescent or trapped modes,
-- a radiative enclosure network for the larger system,
-- a warning when the gap is small enough that near-field effects may matter.
+    %% Main Flowchart Structure
+    subgraph OPTICS["🧪 Material Optics Calculations"]
+        style OPTICS fill:#0f172a,stroke:#0d9488,stroke-width:2px,color:#2dd4bf,font-weight:bold;
+      
+        L["Wavelength λ, Temperature T"] --> MO["material_optics.py"]
+      
+        MO --> T1["Tabulated n(λ), k(λ) at 300 K"]
+        MO --> T2["Drude-Lorentz drift<br/>γ(T) damping"]
+        MO --> T3["Non-local hydrodynamic<br/>correction"]
+      
+        T1 --> T4["TMM thin-film<br/>R, T, A"]
+        T2 --> T4
+        T3 --> T4
+      
+        T4 --> OUT["Effective n(λ,T), k(λ,T)"]
+    end
 
-So the simulator is best understood as a physics-informed approximation for structured radiative surfaces, not as a full wave-solver for all possible optical interactions.
+    %% Apply Classes to Nodes
+    class L inputNode;
+    class MO moduleHub;
+    class T1,T2,T3 physicsStep;
+    class T4 tmmStep;
+    class OUT outputNode;
+
+    %% Corrected Link Styling (Indices 0 through 8)
+    linkStyle 0 stroke:#38bdf8,stroke-width:2px,fill:none;
+    linkStyle 1 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 2 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 3 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 4 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 5 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 6 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 7 stroke:#34d399,stroke-width:2px,fill:none;
+```
 
 ---
 
-## 11. In one paragraph
+## 6. Waveguide modal physics
 
-The simulator works by studying a micro-structured surface as a repeating cavity, then asking how many photons escape from inside it and how many incoming photons get trapped by it. Those escape and absorption probabilities feed into effective emissivity and absorptivity values for the structured surface. After that, the code uses a larger four-surface enclosure model to determine the actual net radiative heat flow between two plates. The reason this matters is that a structured surface can absorb incident radiation very efficiently while emitting much less thermal radiation from inside its cavities, which is exactly the kind of behavior the model is designed to capture.
+```mermaid
+flowchart LR
+    %% Class Definitions
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc,font-family:sans-serif;
+    classDef inputNode fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#e0f2fe;
+    classDef moduleHub fill:#0f172a,stroke:#38bdf8,stroke-width:2.5px,color:#38bdf8,font-weight:bold;
+    classDef calcStep fill:#3730a3,stroke:#818cf8,stroke-width:1.5px,color:#e0e7ff;
+    classDef propStep fill:#701a75,stroke:#f0abfc,stroke-width:1.5px,color:#fdf4ff;
+    classDef outputNode fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff,font-weight:bold;
+
+    %% Subgraph Structure
+    subgraph WAVEGUIDE["🌊 Waveguide Modal Solver"]
+        style WAVEGUIDE fill:#0f172a,stroke:#0d9488,stroke-width:2px,color:#2dd4bf,font-weight:bold;
+
+        D["Cavity diameter D, Height H"] --> WG["waveguide_modes.py"]
+
+        WG --> LC["λ_c = λ_c_PEC / n_real"]
+        WG --> BETA["Complex β = β_real + iα"]
+        WG --> RAP["R_ap, T_ap aperture mismatch"]
+        WG --> ATTN["exp(-αL) attenuation"]
+
+        LC --> PROP["f_prop = Planck power below λ_c"]
+        BETA --> PROP
+
+        RAP --> TT["T_total(λ) multi-mode sum"]
+        ATTN --> TT
+    end
+
+    %% Apply Classes to Nodes
+    class D inputNode;
+    class WG moduleHub;
+    class LC,BETA,RAP,ATTN calcStep;
+    class PROP propStep;
+    class TT outputNode;
+
+    %% Link Styling (Explicitly mapped 0..8 to avoid render errors)
+    linkStyle 0 stroke:#38bdf8,stroke-width:2px,fill:none;
+    linkStyle 1,2,3,4 stroke:#818cf8,stroke-width:2px,fill:none;
+    linkStyle 5,6 stroke:#f0abfc,stroke-width:2px,fill:none;
+    linkStyle 7,8 stroke:#34d399,stroke-width:2px,fill:none;
+```
+
+---
+
+## 7. Radiosity enclosure model
+
+```mermaid
+flowchart LR
+    %% Class Definitions
+    classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc,font-family:sans-serif;
+    classDef plateNode fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#e0f2fe;
+    classDef surrNode fill:#7f1d1d,stroke:#f87171,stroke-width:1.5px,color:#fef2f2;
+    classDef matrixHub fill:#0f172a,stroke:#38bdf8,stroke-width:2.5px,color:#38bdf8,font-weight:bold;
+    classDef outputNode fill:#065f46,stroke:#10b981,stroke-width:2px,color:#ffffff,font-weight:bold;
+
+    %% Subgraph Structure
+    subgraph RADIOSITY["🔥 4-Surface Radiosity Network"]
+        style RADIOSITY fill:#0f172a,stroke:#0d9488,stroke-width:2px,color:#2dd4bf,font-weight:bold;
+
+        %% Surface Exchange Links
+        AF["Plate A front<br/>T_A, ε_A"] -->|F_AF→B| BF["Plate B front"]
+        AB["Plate A back"] -->|F_AB→S| S["Surroundings<br/>T_surr"]
+        BF -->|F_B→S| S
+        AF -->|F_AF→S| S
+
+        %% Matrix Calculations
+        J["Radiosity matrix J"] --> Q["q_net = F × (J_AF - J_B)"]
+        J --> TS["T_stag = (G_B / ε_B σ)^0.25"]
+    end
+
+    %% Apply Classes to Nodes
+    class AF,BF,AB plateNode;
+    class S surrNode;
+    class J matrixHub;
+    class Q,TS outputNode;
+
+    %% Link Styling (Explicitly mapped 0..5 to avoid render errors)
+    linkStyle 0 stroke:#38bdf8,stroke-width:2px,fill:none;
+    linkStyle 1,2,3 stroke:#f87171,stroke-width:2px,fill:none;
+    linkStyle 4,5 stroke:#34d399,stroke-width:2px,fill:none;
+```
+
+---
+
+## 8. Interactive UI features
+
+| Feature              | What it shows                                  |
+| -------------------- | ---------------------------------------------- |
+| Collapsible sections | Config panels collapse/expand                  |
+| Quick presets        | One-click fill: 200K, 3000K, 12000K, room temp |
+| Executive summary    | Plain-English interpretation                   |
+| Physics status strip | Confidence dot + regime badge                  |
+| Regime gauge         | Temperature scale with color zones             |
+| Energy flow bars     | Proportional bars: Emitted / Net / Lost        |
+| Radiation diagram    | Animated canvas: photon flow A to B            |
+| Modal cutoff visual  | Planck curve with lambda markers               |
+| Orchestrator banner  | Full regime breakdown + dimensionless ratios   |
+| Download report      | Human-readable text with all values            |
+
+---
+
+## 9. One-paragraph summary
+
+The simulator studies a micro-structured surface as a repeating cavity, asks how many photons escape from inside it and how many incoming photons get trapped, and applies thin-film, temperature-dependent complex-optical, roughness-scattering, and modal-cutoff corrections along the way. Those escape and absorption probabilities become effective emissivity and absorptivity values. The code then chooses between near-field and far-field physics and solves a four-surface enclosure to get the net radiative heat flow. The reason this matters is that a structured surface can absorb incident radiation very efficiently while emitting much less from inside its cavities - the anisotropic decoupling the model is built to capture.
