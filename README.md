@@ -50,7 +50,6 @@ This simulator runs **photon-scale Monte Carlo experiments** inside repeating ca
 
 ## 🏗️ System Architecture
 
-<<<<<<< HEAD
 ### Physics Orchestrator: Regime Selection
 
 Before any solver runs, the **Physics Orchestrator** (`regime_selector.py`) detects which physics model is appropriate by computing dimensionless ratios:
@@ -67,7 +66,6 @@ The orchestrator also **computes a confidence score** (0–100%) from regime pen
 ### High-Level Data Flow
 =======
 ### Data Flow
->>>>>>> 441c8066e5e47d89311c1e625fb490f4d2208ce8
 
 ```mermaid
 flowchart TD
@@ -130,7 +128,6 @@ flowchart TD
     Output -->|JSON| Display
 ```
 
-<<<<<<< HEAD
 ### Monte Carlo Cavity Experiments
 
 Two photon-scale experiments run inside the repeating unit cell:
